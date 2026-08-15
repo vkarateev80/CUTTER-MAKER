@@ -10,7 +10,8 @@ from src.parser.geometry import CamPath
 class CamApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("LaserCAM Pro - Итеративная обработка")
+        # --- ИЗМЕНЕНО НАЗВАНИЕ ПРОГРАММЫ ---
+        self.root.title("CUTTER MAKER - Итеративная обработка")
         self.root.geometry("1200x700") 
         
         self.input_filepath = None
@@ -82,7 +83,6 @@ class CamApp:
         self.btn_step4 = tk.Button(frame_steps, text="ШАГ 4: Сгенерировать G-код (.TXT)", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), command=self.do_step4)
         self.btn_step4.pack(fill=tk.X, pady=10)
 
-        # --- ОБНОВЛЕННЫЙ ФРЕЙМ ЛОГОВ С ДВУМЯ КНОПКАМИ ---
         frame_log = tk.LabelFrame(self.frame_left, text="Лог работы", padx=10, pady=5)
         frame_log.pack(fill=tk.BOTH, expand=True)
         
@@ -98,7 +98,6 @@ class CamApp:
         self.text_log = tk.Text(frame_log, height=10, width=45, state=tk.DISABLED, bg="#f0f0f0")
         self.text_log.pack(fill=tk.BOTH, expand=True)
 
-        # --- ПРАВАЯ ПАНЕЛЬ ---
         frame_tools = tk.Frame(self.frame_right)
         frame_tools.pack(fill=tk.X)
         self.btn_measure = tk.Button(frame_tools, text="📏 Инструмент: Замер расстояния", bg="#e0e0e0", command=self.toggle_measure)
@@ -117,7 +116,6 @@ class CamApp:
         self.canvas.bind("<Button-4>", self.on_mousewheel)
         self.canvas.bind("<Button-5>", self.on_mousewheel)
 
-    # --- ЛОГИКА ИНСТРУМЕНТА ЗАМЕРА ---
     def toggle_measure(self):
         self.is_measuring = not self.is_measuring
         if self.is_measuring:
@@ -284,7 +282,6 @@ class CamApp:
                 sy = self.canvas_h - (y * self.current_scale + self.current_ty)
                 self.canvas.create_oval(sx - radius, sy - radius, sx + radius, sy + radius, outline=color_hex, width=2, tags="error_marker")
 
-    # --- СИСТЕМНЫЕ ФУНКЦИИ ЛОГИРОВАНИЯ ---
     def log(self, message: str):
         self.text_log.config(state=tk.NORMAL)
         self.text_log.insert(tk.END, message + "\n")
@@ -300,7 +297,6 @@ class CamApp:
             messagebox.showinfo("Скопировано", "Логи скопированы!")
             
     def clear_logs(self):
-        """Очищает текстовое окно логов."""
         self.text_log.config(state=tk.NORMAL)
         self.text_log.delete("1.0", tk.END)
         self.text_log.config(state=tk.DISABLED)
