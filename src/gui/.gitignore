@@ -1,0 +1,28 @@
+# Виртуальное окружение
+venv/
+env/
+
+# Кэш Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Папки сборки PyInstaller (наши .exe файлы)
+build/
+dist/
+*.spec
+
+# Тяжелые сторонние движки (не заливаем в Git!)
+inkscape_engine/
+ghostscript_engine/
+
+# Сгенерированные G-коды и временные файлы
+data/*.txt
+data/*.gcode
+data/*.nc
+temp_*/
+*.tmp
+
+# Настройки редактора VS Code
+.vscode/
