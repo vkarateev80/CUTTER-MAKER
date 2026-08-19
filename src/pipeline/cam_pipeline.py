@@ -123,22 +123,30 @@ class CamPipeline:
             if len(p.points) > 1: msp.add_lwpolyline(p.points, close=p.is_closed)
         doc.saveas(output_path)
 
-    def generate_uv_mask_pdf(self, paths: list[CamPath], offset_val: float, output_path: str | Path, badge_text: str = "", mark_d: float = 4.0, mark_margin: float = 10.0) -> tuple[list[CamPath], list[CamPath]]:
+    def generate_uv_mask_pdf(self, paths: list[CamPath], offset_val: float, output_path: str | Path, badge_text: str = "", mark_d: float = 4.0, mark_margin: float = 10.0) -> tuple[list[CamPath], list[CamPath], Polygon]:
         print(f"Генерация УФ-Маски: Офсет={offset_val}мм, Метки={mark_d}мм...")
         
-        lines = [LineString(p.points) for p in paths if len(p.points) > 1]
-        mask_geom = MultiLineString(lines).buffer(offset_val, cap_style=1, join_style=1) if lines else Polygon()
+        lines = []
+        for p in paths:
+            if len(p.points) > 1:
+                pts_2d = [(pt[0], pt[1]) for pt in p.points]
+                lines.append(LineString(pts_2d))
+                
+        # ИСПРАВЛЕНИЕ: mitre_limit=50.0 и simplify(0.001) для маски
+        mask_geom = MultiLineString(lines).buffer(offset_val, cap_style=2, join_style=2, mitre_limit=50.0).simplify(0.001, preserve_topology=True) if lines else Polygon()
 
         pure_mask_paths = []
         def extract_pure_paths(geom):
             if isinstance(geom, Polygon):
                 if geom.is_empty: return
                 cp = CamPath(is_closed=True, layer_name="MASK_EXTERIOR")
-                for x, y in geom.exterior.coords: cp.add_point(round(x, 4), round(y, 4))
+                for pt in geom.exterior.coords: 
+                    cp.add_point(round(pt[0], 4), round(pt[1], 4))
                 pure_mask_paths.append(cp)
                 for interior in geom.interiors:
                     cp_hole = CamPath(is_closed=True, layer_name="MASK_HOLE")
-                    for x, y in interior.coords: cp_hole.add_point(round(x, 4), round(y, 4))
+                    for pt in interior.coords: 
+                        cp_hole.add_point(round(pt[0], 4), round(pt[1], 4))
                     pure_mask_paths.append(cp_hole)
             elif isinstance(geom, MultiPolygon):
                 for g in geom.geoms: extract_pure_paths(g)
@@ -168,11 +176,13 @@ class CamPipeline:
             if isinstance(geom, Polygon):
                 if geom.is_empty: return
                 cp = CamPath(is_closed=True, layer_name="MASK_EXTRA")
-                for x, y in geom.exterior.coords: cp.add_point(round(x, 4), round(y, 4))
+                for pt in geom.exterior.coords: 
+                    cp.add_point(round(pt[0], 4), round(pt[1], 4))
                 mask_visual_paths.append(cp)
                 for interior in geom.interiors:
                     cp_hole = CamPath(is_closed=True, layer_name="MASK_EXTRA")
-                    for x, y in interior.coords: cp_hole.add_point(round(x, 4), round(y, 4))
+                    for pt in interior.coords: 
+                        cp_hole.add_point(round(pt[0], 4), round(pt[1], 4))
                     mask_visual_paths.append(cp_hole)
             elif isinstance(geom, MultiPolygon):
                 for g in geom.geoms: extract_extra_paths(g)
@@ -197,14 +207,14 @@ class CamPipeline:
             if isinstance(geom, Polygon):
                 if geom.is_empty: return
                 d = []
-                for i, (x, y) in enumerate(geom.exterior.coords):
+                for i, pt in enumerate(geom.exterior.coords):
                     cmd = "M" if i == 0 else "L"
-                    d.append(f"{cmd} {x - min_x + margin:.4f} {height - (y - overall_min_y + margin):.4f}")
+                    d.append(f"{cmd} {pt[0] - min_x + margin:.4f} {height - (pt[1] - overall_min_y + margin):.4f}")
                 d.append("Z")
                 for interior in geom.interiors:
-                    for i, (x, y) in enumerate(interior.coords):
+                    for i, pt in enumerate(interior.coords):
                         cmd = "M" if i == 0 else "L"
-                        d.append(f"{cmd} {x - min_x + margin:.4f} {height - (y - overall_min_y + margin):.4f}")
+                        d.append(f"{cmd} {pt[0] - min_x + margin:.4f} {height - (pt[1] - overall_min_y + margin):.4f}")
                     d.append("Z")
                 svg_content.append(f'<path d="{" ".join(d)}" fill="black" fill-rule="evenodd" stroke="none" />')
             elif isinstance(geom, MultiPolygon):
@@ -240,22 +250,21 @@ class CamPipeline:
             try: safe_svg.unlink()
             except: pass
             
-        return mask_visual_paths, pure_mask_paths
+        return mask_visual_paths, pure_mask_paths, mask_geom
 
-    def generate_gcode(self, paths: list[CamPath], output_path: str | Path, angle: float, tip: float, depth: float, step_down: float, enable_sharpening: bool = True) -> list[CamPath]:
-        print("[ЧПУ] Расчет эквидистант и 3D-подрезки углов...")
+    def generate_gcode(self, mask_geom, output_path: str | Path, angle: float, tip: float, depth: float, step_down: float, mask_offset: float, enable_sharpening: bool) -> tuple[list[CamPath], list[CamPath]]:
+        print("[ЧПУ] Расчет Идеального лезвия и эквидистант от УФ-Маски...")
         
         tool = VBitTool(angle_deg=angle, tip_diameter=tip, depth=depth)
         print(f"      Инструмент: V-фреза {angle}°, Пятно={tip}мм, Z={depth}мм, Шаг={step_down}мм")
         print(f"      Радиус смещения (R_eff): {tool.offset_radius:.4f} мм")
         
-        # Передаем флаг enable_sharpening в сортировщик
-        offset_paths = self.nesting.process_wells(paths, tool.offset_radius, tool.depth, enable_sharpening)
+        ideal_paths, cnc_paths = self.nesting.process_mask_geometry(mask_geom, mask_offset, tool.offset_radius, tool.depth, enable_sharpening)
         
-        print(f"[ЧПУ] Генерация G-кода (Многопроходная обработка. Подрезка углов: {'ВКЛ' if enable_sharpening else 'ВЫКЛ'})...")
-        gcode_text = self.compiler.compile(offset_paths, depth=-tool.depth, step_down=step_down)
+        print(f"[ЧПУ] Генерация G-кода (Подрезка: {'ВКЛ' if enable_sharpening else 'ВЫКЛ'})...")
+        gcode_text = self.compiler.compile(cnc_paths, depth=-tool.depth, step_down=step_down)
         
         with open(output_path, "w", encoding="utf-8") as f: 
             f.write(gcode_text)
             
-        return offset_paths
+        return ideal_paths, cnc_paths

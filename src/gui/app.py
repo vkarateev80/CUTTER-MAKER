@@ -17,11 +17,15 @@ class CamApp:
         
         self.input_filepath = None
         self.raw_paths, self.ready_paths, self.paths_to_draw = [], [], []
-        self.cnc_base_paths = [] 
+        self.mask_geom = None 
         
-        self.layers = {"raw": [], "healed": [], "mask": [], "cnc": []}
-        self.show_raw, self.show_healed, self.show_mask, self.show_cnc = tk.BooleanVar(value=True), tk.BooleanVar(value=True), tk.BooleanVar(value=True), tk.BooleanVar(value=True)
-        # Переменная для галочки "Подрезка углов" (по умолчанию включена)
+        self.layers = {"raw": [], "healed": [], "mask": [], "ideal": [], "cnc": []}
+        self.show_raw = tk.BooleanVar(value=True)
+        self.show_healed = tk.BooleanVar(value=True)
+        self.show_mask = tk.BooleanVar(value=True)
+        self.show_ideal = tk.BooleanVar(value=False)
+        self.show_cnc = tk.BooleanVar(value=True)
+        
         self.enable_sharpening = tk.BooleanVar(value=True)
         
         self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
@@ -46,10 +50,16 @@ class CamApp:
 
         frame_prep = tk.LabelFrame(self.frame_left, text="2. Анализ и Лечение", padx=10, pady=10)
         frame_prep.pack(fill=tk.X, pady=5)
+        
         tk.Label(frame_prep, text="Допуск лечения (мм):").pack(anchor=tk.W)
-        self.entry_tolerance = tk.Entry(frame_prep, width=15); self.entry_tolerance.insert(0, "0.01"); self.entry_tolerance.pack(anchor=tk.W, pady=(0, 5))
+        self.entry_tolerance = tk.Entry(frame_prep, width=15)
+        self.entry_tolerance.insert(0, "2.0")
+        self.entry_tolerance.pack(anchor=tk.W, pady=(0, 5))
+        
         tk.Label(frame_prep, text="Удалять пыль/петли < (мм/мм²):").pack(anchor=tk.W)
-        self.entry_loop_area = tk.Entry(frame_prep, width=15); self.entry_loop_area.insert(0, "1.0"); self.entry_loop_area.pack(anchor=tk.W, pady=(0, 10))
+        self.entry_loop_area = tk.Entry(frame_prep, width=15)
+        self.entry_loop_area.insert(0, "1.0")
+        self.entry_loop_area.pack(anchor=tk.W, pady=(0, 10))
 
         self.btn_step1 = tk.Button(frame_prep, text="ШАГ 1: Извлечь векторы", bg="#e0e0e0", command=self.do_step1)
         self.btn_step1.pack(fill=tk.X, pady=2)
@@ -65,46 +75,43 @@ class CamApp:
         frame_export.pack(fill=tk.X, pady=5)
         
         tk.Label(frame_export, text="Компенсация подтравливания (Офсет, мм):", fg="blue", font=("Arial", 9, "bold")).pack(anchor=tk.W)
-        self.entry_offset = tk.Entry(frame_export, width=15, bg="#E6F2FF"); self.entry_offset.insert(0, "0.05"); self.entry_offset.pack(anchor=tk.W, pady=(0, 5))
+        self.entry_offset = tk.Entry(frame_export, width=15, bg="#E6F2FF")
+        self.entry_offset.insert(0, "0.2") # <--- ИЗМЕНЕНО ЗДЕСЬ
+        self.entry_offset.pack(anchor=tk.W, pady=(0, 5))
         
         tk.Label(frame_export, text="Реперные метки D / Отступ (мм):").pack(anchor=tk.W)
         frame_marks_inputs = tk.Frame(frame_export)
         frame_marks_inputs.pack(fill=tk.X, pady=(0, 5))
-        self.entry_mark_d = tk.Entry(frame_marks_inputs, width=6)
-        self.entry_mark_d.insert(0, "4.0")
-        self.entry_mark_d.pack(side=tk.LEFT, padx=(0, 5))
-        self.entry_mark_margin = tk.Entry(frame_marks_inputs, width=6)
-        self.entry_mark_margin.insert(0, "10.0")
-        self.entry_mark_margin.pack(side=tk.LEFT)
+        self.entry_mark_d = tk.Entry(frame_marks_inputs, width=6); self.entry_mark_d.insert(0, "4.0"); self.entry_mark_d.pack(side=tk.LEFT, padx=(0, 5))
+        self.entry_mark_margin = tk.Entry(frame_marks_inputs, width=6); self.entry_mark_margin.insert(0, "10.0"); self.entry_mark_margin.pack(side=tk.LEFT)
 
         self.btn_mask = tk.Button(frame_export, text="🖨 Создать УФ-Маску (.PDF)", bg="#9370DB", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.export_uv_mask)
         self.btn_mask.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Label(frame_export, text="V-Фреза (Угол° / Пятно / Глуб. Z / Шаг Z):").pack(anchor=tk.W, pady=(5, 0))
-        frame_cnc_inputs = tk.Frame(frame_export)
-        frame_cnc_inputs.pack(fill=tk.X, pady=(0, 5))
+        frame_cnc_tools = tk.LabelFrame(frame_export, text="🛠 Настройки Фрезы и Гравировки", padx=5, pady=5, bg="#f9f9f9")
+        frame_cnc_tools.pack(fill=tk.X, pady=(0, 10))
         
-        self.entry_cnc_angle = tk.Entry(frame_cnc_inputs, width=5)
-        self.entry_cnc_angle.insert(0, "60.0")
-        self.entry_cnc_angle.pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(frame_cnc_tools, text="📐 Угол (°):", bg="#f9f9f9", fg="#333", font=("Arial", 8)).grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.entry_cnc_angle = tk.Entry(frame_cnc_tools, width=6); self.entry_cnc_angle.insert(0, "60.0")
+        self.entry_cnc_angle.grid(row=0, column=1, padx=5, pady=2)
         
-        self.entry_cnc_tip = tk.Entry(frame_cnc_inputs, width=5)
-        self.entry_cnc_tip.insert(0, "0.1")
-        self.entry_cnc_tip.pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(frame_cnc_tools, text="🎯 Пятно (мм):", bg="#f9f9f9", fg="#333", font=("Arial", 8)).grid(row=0, column=2, sticky=tk.W, pady=2)
+        self.entry_cnc_tip = tk.Entry(frame_cnc_tools, width=6); self.entry_cnc_tip.insert(0, "0.1")
+        self.entry_cnc_tip.grid(row=0, column=3, padx=5, pady=2)
         
-        self.entry_cnc_depth = tk.Entry(frame_cnc_inputs, width=5)
-        self.entry_cnc_depth.insert(0, "0.5")
-        self.entry_cnc_depth.pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(frame_cnc_tools, text="⏬ Глуб. Z (мм):", bg="#f9f9f9", fg="#333", font=("Arial", 8)).grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.entry_cnc_depth = tk.Entry(frame_cnc_tools, width=6); self.entry_cnc_depth.insert(0, "0.5")
+        self.entry_cnc_depth.grid(row=1, column=1, padx=5, pady=2)
         
-        self.entry_cnc_step = tk.Entry(frame_cnc_inputs, width=5)
-        self.entry_cnc_step.insert(0, "0.2") 
-        self.entry_cnc_step.pack(side=tk.LEFT)
+        tk.Label(frame_cnc_tools, text="🪜 Шаг Z (мм):", bg="#f9f9f9", fg="#333", font=("Arial", 8)).grid(row=1, column=2, sticky=tk.W, pady=2)
+        self.entry_cnc_step = tk.Entry(frame_cnc_tools, width=6); self.entry_cnc_step.insert(0, "0.2")
+        self.entry_cnc_step.grid(row=1, column=3, padx=5, pady=2)
 
-        # Чекбокс для вкл/выкл подрезки углов
-        tk.Checkbutton(frame_export, text="Включить 3D-подрезку внутренних углов", fg="#FF4500", font=("Arial", 9, "bold"), variable=self.enable_sharpening).pack(anchor=tk.W, pady=(2, 5))
+        tk.Checkbutton(frame_cnc_tools, text="🔪 3D-Подрезка (Только внутр. углы)", bg="#f9f9f9", fg="#FF4500", font=("Arial", 9, "bold"), variable=self.enable_sharpening).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
 
-        tk.Label(frame_export, text="Скорость реза ЧПУ (F):").pack(anchor=tk.W)
+        tk.Label(frame_export, text="⚡ Скорость реза ЧПУ (F):").pack(anchor=tk.W)
         self.entry_feedrate = tk.Entry(frame_export, width=15); self.entry_feedrate.insert(0, "1500"); self.entry_feedrate.pack(anchor=tk.W, pady=(0, 5))
+        
         self.btn_cnc = tk.Button(frame_export, text="⚙️ Сгенерировать УП (.TXT)", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.export_cnc)
         self.btn_cnc.pack(fill=tk.X, pady=2)
 
@@ -122,10 +129,12 @@ class CamApp:
         self.btn_measure = tk.Button(frame_tools, text="📏 Замер", bg="#e0e0e0", command=self.toggle_measure); self.btn_measure.pack(side=tk.LEFT)
         frame_layers = tk.LabelFrame(self.frame_right, text="Слои видимости", padx=5, pady=5)
         frame_layers.pack(fill=tk.X, pady=(0, 10))
+        
         tk.Checkbutton(frame_layers, text="Исходник (Серый)", fg="#555555", font=("Arial", 9, "bold"), variable=self.show_raw, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
         tk.Checkbutton(frame_layers, text="Вылеченный (Синий)", fg="#008888", font=("Arial", 9, "bold"), variable=self.show_healed, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
         tk.Checkbutton(frame_layers, text="УФ-Маска (Пурпурный)", fg="#880088", font=("Arial", 9, "bold"), variable=self.show_mask, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
-        tk.Checkbutton(frame_layers, text="Траектория УП (Зеленый)", fg="#008800", font=("Arial", 9, "bold"), variable=self.show_cnc, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
+        tk.Checkbutton(frame_layers, text="Идеальное лезвие (Желтый)", fg="#CCCC00", font=("Arial", 9, "bold"), variable=self.show_ideal, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
+        tk.Checkbutton(frame_layers, text="Траектория УП (Зеленый/Бирюзовый)", fg="#008800", font=("Arial", 9, "bold"), variable=self.show_cnc, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
 
         frame_canvas = tk.LabelFrame(self.frame_right, text="Предпросмотр (ЛКМ - Двигать | Колесико - Масштаб)", padx=5, pady=5)
         frame_canvas.pack(fill=tk.BOTH, expand=True)
@@ -159,10 +168,11 @@ class CamApp:
         self.lbl_proj_info.config(text=f"Папка: {proj_name}\nМакет: {Path(filepath).name}", fg="black")
         
         self.canvas.delete("all")
-        self.raw_paths, self.ready_paths, self.cnc_base_paths = [], [], []
-        self.layers = {"raw": [], "healed": [], "mask": [], "cnc": []}
+        self.raw_paths, self.ready_paths = [], []
+        self.mask_geom = None
+        self.layers = {"raw": [], "healed": [], "mask": [], "ideal": [], "cnc": []}
         self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
-        self.show_raw.set(True); self.show_healed.set(True); self.show_mask.set(True); self.show_cnc.set(True)
+        self.show_raw.set(True); self.show_healed.set(True); self.show_mask.set(True); self.show_ideal.set(False); self.show_cnc.set(True)
         self.btn_mask.config(state=tk.DISABLED); self.btn_cnc.config(state=tk.DISABLED)
         self.log(f"\n=== ПРОЕКТ {proj_name} СОЗДАН ===")
 
@@ -219,9 +229,9 @@ class CamApp:
         result_paths = self._run_with_redirect(CamPipeline().generate_uv_mask_pdf, self.ready_paths, offset, mask_file, final_badge_text, mark_d, mark_margin)
         
         if result_paths:
-            visual_paths, pure_paths = result_paths
+            visual_paths, pure_paths, mask_geom = result_paths
             self.layers["mask"] = visual_paths
-            self.cnc_base_paths = pure_paths 
+            self.mask_geom = mask_geom
             
             self.show_mask.set(True)
             self.fit_to_screen()
@@ -229,10 +239,11 @@ class CamApp:
             messagebox.showinfo("Готово", "УФ-Маска с метками и кастомной инфо-панелью успешно сохранена.")
 
     def export_cnc(self):
-        if not self.cnc_base_paths: 
+        if not self.mask_geom: 
             return messagebox.showwarning("Внимание", "Сначала создайте УФ-Маску!\nЧПУ использует контуры маски как базовые для расчета лезвия.")
             
         try: 
+            offset = float(self.entry_offset.get())
             f_rate = int(self.entry_feedrate.get())
             angle = float(self.entry_cnc_angle.get())
             tip = float(self.entry_cnc_tip.get())
@@ -242,17 +253,18 @@ class CamApp:
             return messagebox.showerror("Ошибка", "Неверный формат чисел в настройках инструмента ЧПУ!")
             
         cnc_file = self.current_project_dir / "ЧПУ" / "04_УП_Фрезер.txt"
-        
-        # Получаем значение галочки
         sharpen = self.enable_sharpening.get()
         
-        generated_paths = self._run_with_redirect(CamPipeline(feedrate=f_rate).generate_gcode, self.cnc_base_paths, cnc_file, angle, tip, depth, step_z, sharpen)
+        generated_paths = self._run_with_redirect(CamPipeline(feedrate=f_rate).generate_gcode, self.mask_geom, cnc_file, angle, tip, depth, step_z, offset, sharpen)
         
         if generated_paths:
-            self.layers["cnc"] = generated_paths
+            ideal_paths, cnc_paths = generated_paths
+            self.layers["ideal"] = ideal_paths
+            self.layers["cnc"] = cnc_paths
+            self.show_ideal.set(True)
             self.show_cnc.set(True)
             self.render_canvas()
-            messagebox.showinfo("Готово", "УП сохранена! Зеленая траектория построена на основе УФ-Маски.")
+            messagebox.showinfo("Готово", "УП сохранена!")
 
     def toggle_measure(self):
         self.is_measuring = not self.is_measuring
@@ -268,26 +280,37 @@ class CamApp:
         if self.show_raw.get(): visible.extend(self.layers["raw"])
         if self.show_healed.get(): visible.extend(self.layers["healed"])
         if self.show_mask.get(): visible.extend(self.layers["mask"])
+        if self.show_ideal.get(): visible.extend(self.layers["ideal"])
         if self.show_cnc.get(): visible.extend(self.layers["cnc"])
         return visible
 
     def get_snapped_coords(self, sx, sy):
         wx, wy = self.screen_to_world(sx, sy)
         visible_paths = self.get_visible_paths()
-        if not visible_paths: return wx, wy
+        if not visible_paths: return wx, wy, None, None
+        
         snap_threshold_world = 15 / self.current_scale
-        closest_dist, closest_pt = float('inf'), None
+        closest_dist, closest_pt, closest_layer = float('inf'), None, None
+        
         for path in visible_paths:
             for pt in path.points:
                 dist = math.hypot(pt[0] - wx, pt[1] - wy)
-                if dist < closest_dist and dist < snap_threshold_world: closest_dist, closest_pt = dist, pt
-        return (closest_pt[0], closest_pt[1]) if closest_pt else (wx, wy)
+                if dist <= closest_dist and dist < snap_threshold_world: 
+                    closest_dist = dist
+                    closest_pt = pt
+                    closest_layer = path.layer_name
+                    
+        if closest_pt:
+            return closest_pt[0], closest_pt[1], closest_pt, closest_layer
+        return wx, wy, None, None
 
     def on_left_click(self, event):
         self.canvas_h = self.canvas.winfo_height()
         if self.is_measuring:
-            wx, wy = self.get_snapped_coords(event.x, event.y)
-            if not self.measure_pt1: self.measure_pt1 = (wx, wy); self.log(f"-> Замер от: X={wx:.3f}, Y={wy:.3f}")
+            wx, wy, snapped_pt, _ = self.get_snapped_coords(event.x, event.y)
+            if not self.measure_pt1: 
+                self.measure_pt1 = (wx, wy)
+                self.log(f"-> Замер от: X={wx:.3f}, Y={wy:.3f}")
             else:
                 dist = math.hypot(wx - self.measure_pt1[0], wy - self.measure_pt1[1])
                 self.log(f"=== РАССТОЯНИЕ: {dist:.4f} мм ===")
@@ -302,15 +325,33 @@ class CamApp:
         if self.is_measuring and self.measure_pt1: self.measure_pt1 = None; self.canvas.delete("measure_dynamic")
 
     def on_mouse_move(self, event):
+        self.canvas.delete("hover_tooltip")
+        wx, wy, snapped_pt, layer_name = self.get_snapped_coords(event.x, event.y)
+        
         if self.is_measuring and self.measure_pt1:
             self.canvas.delete("measure_dynamic")
-            wx, wy = self.get_snapped_coords(event.x, event.y)
             dist = math.hypot(wx - self.measure_pt1[0], wy - self.measure_pt1[1])
             sx1, sy1 = self.measure_pt1[0] * self.current_scale + self.current_tx, self.canvas_h - (self.measure_pt1[1] * self.current_scale + self.current_ty)
             sx2, sy2 = wx * self.current_scale + self.current_tx, self.canvas_h - (wy * self.current_scale + self.current_ty)
             self.canvas.create_line(sx1, sy1, sx2, sy2, fill="#FFD700", dash=(4, 4), tags="measure_dynamic")
             self.canvas.create_oval(sx2-4, sy2-4, sx2+4, sy2+4, outline="#FFD700", width=2, tags="measure_dynamic")
             self.canvas.create_text(event.x + 15, event.y - 15, text=f"{dist:.3f} мм", fill="#FFD700", font=("Arial", 11, "bold"), anchor=tk.SW, tags="measure_dynamic")
+        
+        elif snapped_pt:
+            sx2 = wx * self.current_scale + self.current_tx
+            sy2 = self.canvas_h - (wy * self.current_scale + self.current_ty)
+            self.canvas.create_oval(sx2-4, sy2-4, sx2+4, sy2+4, outline="#00FFFF", width=2, tags="hover_tooltip")
+            
+            if len(snapped_pt) > 2:
+                text = f"Слой: {layer_name}\nX: {snapped_pt[0]:.3f}\nY: {snapped_pt[1]:.3f}\nZ: {snapped_pt[2]:.3f}"
+            else:
+                text = f"Слой: {layer_name}\nX: {snapped_pt[0]:.3f}\nY: {snapped_pt[1]:.3f}"
+                
+            text_id = self.canvas.create_text(event.x + 15, event.y - 15, text=text, fill="#00FFFF", font=("Arial", 10, "bold"), anchor=tk.SW, tags="hover_tooltip")
+            bbox = self.canvas.bbox(text_id)
+            if bbox:
+                self.canvas.create_rectangle(bbox[0]-3, bbox[1]-3, bbox[2]+3, bbox[3]+3, fill="#1e1e1e", outline="#00FFFF", tags="hover_tooltip")
+                self.canvas.tag_raise(text_id)
 
     def on_pan_move(self, event):
         if self.is_measuring: return 
@@ -346,7 +387,16 @@ class CamApp:
     def render_canvas(self):
         self.canvas.delete("all")
         self.canvas_h = self.canvas.winfo_height()
-        for show_var, paths, color, width, dash in [(self.show_mask, self.layers["mask"], "#FF1493", 3.0, None), (self.show_raw, self.layers["raw"], "#AAAAAA", 1.0, None), (self.show_healed, self.layers["healed"], "#00FFFF", 1.5, None), (self.show_cnc, self.layers["cnc"], "#00FF00", 1.5, (5, 5))]:
+        
+        layers_to_draw = [
+            (self.show_raw, self.layers["raw"], "#555555", 1.0, None),
+            (self.show_healed, self.layers["healed"], "#00FFFF", 1.5, None),
+            (self.show_mask, self.layers["mask"], "#FF1493", 2.0, None),
+            (self.show_ideal, self.layers["ideal"], "#FFFF00", 2.0, None), 
+            (self.show_cnc, self.layers["cnc"], "#00FF00", 1.5, (5, 5))
+        ]
+        
+        for show_var, paths, color, width, dash in layers_to_draw:
             if show_var.get() and paths:
                 for path in paths:
                     if len(path.points) < 2: continue
@@ -392,7 +442,8 @@ class CamApp:
         if not self.input_filepath: return messagebox.showwarning("Внимание", "Сначала СОЗДАЙТЕ ПРОЕКТ!")
         self.raw_paths = self._run_with_redirect(CamPipeline().step1_parse, self.input_filepath)
         if self.raw_paths:
-            self.layers["raw"] = self.raw_paths; self.layers["healed"], self.layers["mask"], self.layers["cnc"], self.cnc_base_paths = [], [], [], []
+            self.layers["raw"] = self.raw_paths; self.layers["healed"], self.layers["mask"], self.layers["ideal"], self.layers["cnc"] = [], [], [], []
+            self.mask_geom = None
             self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
             self.fit_to_screen(); self.render_canvas()
 
@@ -418,6 +469,7 @@ class CamApp:
 
     def do_reset(self):
         if not self.raw_paths: return
-        self.ready_paths, self.cnc_base_paths, self.layers["healed"], self.layers["mask"], self.layers["cnc"] = [], [], [], [], []
+        self.ready_paths, self.mask_geom = [], None
+        self.layers["healed"], self.layers["mask"], self.layers["ideal"], self.layers["cnc"] = [], [], [], []
         self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
         self.render_canvas(); self.btn_mask.config(state=tk.DISABLED); self.btn_cnc.config(state=tk.DISABLED)

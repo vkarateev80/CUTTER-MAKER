@@ -18,27 +18,15 @@ class GCodeCompiler:
             z_passes.append(round(current_z, 3))
         z_passes.append(round(target_depth, 3)) 
 
-        for i, path in enumerate(paths):
+        regular_paths = [p for p in paths if p.layer_name != "SHARPEN"]
+        sharpen_paths = [p for p in paths if p.layer_name == "SHARPEN"]
+
+        # =========================================================
+        # ЭТАП 1: ПОСЛОЙНАЯ ВЫБОРКА ОСНОВНЫХ КОНТУРОВ
+        # =========================================================
+        for i, path in enumerate(regular_paths):
             if not path.points: continue
             
-            # --- СПЕЦИАЛЬНЫЙ БЛОК ДЛЯ 3D ПОДРЕЗКИ УГЛОВ ---
-            if path.layer_name == "SHARPEN":
-                gcode.append(f"\n; --- 3D Подрезка Угла ---")
-                start_pt = path.points[0]
-                gcode.append(f"G0 X{start_pt[0]:.3f} Y{start_pt[1]:.3f}")
-                gcode.append("M3 S1000")
-                gcode.append(f"G1 Z{start_pt[2]:.3f} F300") # Опускаемся на дно
-                
-                # 3D движение X, Y, Z одновременно!
-                for pt in path.points[1:]:
-                    z_val = pt[2] if len(pt) > 2 else start_pt[2]
-                    gcode.append(f"G1 X{pt[0]:.3f} Y{pt[1]:.3f} Z{z_val:.3f} F{self.feedrate}")
-                    
-                gcode.append(f"G0 Z{self.safe_z:.3f}")
-                gcode.append("M5")
-                continue
-            # ----------------------------------------------
-
             gcode.append(f"\n; --- Контур {i+1} (Слой: {path.layer_name}) ---")
             start_pt = path.points[0]
             gcode.append(f"G0 X{start_pt[0]:.3f} Y{start_pt[1]:.3f}")
@@ -49,10 +37,10 @@ class GCodeCompiler:
                 gcode.append(f"G1 Z{pass_z:.3f} F300")
                 
                 for pt in path.points[1:]:
-                    gcode.append(f"G1 X{pt[0]:.3f} Y{pt[1]:.3f} F{self.feedrate}")
+                    gcode.append(f"G1 X{pt[0]:.3f} Y{pt[1]:.3f} Z{pass_z:.3f} F{self.feedrate}")
                     
                 if path.is_closed and path.points[-1] != start_pt:
-                    gcode.append(f"G1 X{start_pt[0]:.3f} Y{start_pt[1]:.3f} F{self.feedrate}")
+                    gcode.append(f"G1 X{start_pt[0]:.3f} Y{start_pt[1]:.3f} Z{pass_z:.3f} F{self.feedrate}")
                     
                 if pass_idx < len(z_passes) - 1 and not path.is_closed:
                     gcode.append(f"G0 Z{self.safe_z:.3f}")
@@ -60,8 +48,32 @@ class GCodeCompiler:
                     
             gcode.append(f"G0 Z{self.safe_z:.3f}")
             gcode.append("M5")
+
+        # =========================================================
+        # ЭТАП 2: ФИНАЛЬНАЯ ПОДРЕЗКА УГЛОВ
+        # =========================================================
+        if sharpen_paths:
+            gcode.append("\n; --- 3D ПОДРЕЗКА ВНУТРЕННИХ УГЛОВ ---")
+            gcode.append("M3 S1000")
+            for i, path in enumerate(sharpen_paths):
+                if len(path.points) < 2: continue
+                
+                start_pt = path.points[0] # Дно (в очищенной зоне ЧПУ)
+                end_pt = path.points[1]   # Вершина (в теле заготовки)
+                
+                z_start = start_pt[2] if len(start_pt) > 2 else target_depth
+                z_end = end_pt[2] if len(end_pt) > 2 else 0.000
+                
+                gcode.append(f"\n; Угол {i+1}")
+                gcode.append(f"G0 X{start_pt[0]:.3f} Y{start_pt[1]:.3f}")
+                gcode.append(f"G1 Z{z_start:.3f} F300")
+                gcode.append(f"G1 X{end_pt[0]:.3f} Y{end_pt[1]:.3f} Z{z_end:.3f} F300")
+                gcode.append(f"G0 Z{self.safe_z:.3f}")
+                
+            gcode.append("M5")
             
         gcode.append("\n; --- КОНЕЦ ПРОГРАММЫ ---")
+        gcode.append(f"G0 Z{self.safe_z:.3f}")
         gcode.append("G0 X0.000 Y0.000")
         gcode.append("M30")
         return "\n".join(gcode)
