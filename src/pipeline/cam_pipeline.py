@@ -24,8 +24,6 @@ from src.optimizer.nesting import NestingOptimizer
 from src.compiler.gcode_compiler import GCodeCompiler
 from src.compiler.tool import VBitTool
 from src.parser.geometry import CamPath
-
-# ИМПОРТ НАШИХ НОВЫХ БАЗ ДАННЫХ
 from src.db.models import Tool, PostProcessor
 
 class CamPipeline:
@@ -123,6 +121,37 @@ class CamPipeline:
         for p in paths:
             if len(p.points) > 1: msp.add_lwpolyline(p.points, close=p.is_closed)
         doc.saveas(output_path)
+
+    def export_paths_to_svg(self, paths: list[CamPath], output_path: str | Path):
+        """Экспортирует геометрию во временный SVG для Live Edit в Inkscape."""
+        if not paths: return
+        all_x = [pt[0] for p in paths for pt in p.points]
+        all_y = [pt[1] for p in paths for pt in p.points]
+        if not all_x: return
+        
+        min_x, max_x = min(all_x), max(all_x)
+        min_y, max_y = min(all_y), max(all_y)
+        w = max(max_x - min_x, 1.0)
+        h = max(max_y - min_y, 1.0)
+        
+        svg = [f'<?xml version="1.0" encoding="UTF-8" standalone="no"?>']
+        # Инвертируем Y для SVG
+        svg.append(f'<svg width="{w+2}mm" height="{h+2}mm" viewBox="{min_x-1} {-max_y-1} {w+2} {h+2}" xmlns="http://www.w3.org/2000/svg">')
+        
+        for p in paths:
+            if len(p.points) < 2: continue
+            d = []
+            for i, pt in enumerate(p.points):
+                cmd = "M" if i == 0 else "L"
+                d.append(f"{cmd} {pt[0]:.4f} {-pt[1]:.4f}")
+            if p.is_closed: d.append("Z")
+            
+            color = "blue" if p.layer_name.startswith("HEALED") else "black"
+            svg.append(f'<path d="{" ".join(d)}" fill="none" stroke="{color}" stroke-width="0.2" />')
+            
+        svg.append('</svg>')
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(svg))
 
     def generate_uv_mask_pdf(self, paths: list[CamPath], offset_val: float, output_path: str | Path, badge_text: str = "", mark_d: float = 4.0, mark_margin: float = 10.0) -> tuple[list[CamPath], list[CamPath], Polygon]:
         print(f"Генерация УФ-Маски: Офсет={offset_val}мм, Метки={mark_d}мм...")
