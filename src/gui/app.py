@@ -42,6 +42,10 @@ class CamApp:
         self.selected_path = None
         self.selected_node_idx = None
         self.hovered_node_idx = None
+        self.weld_anchor = None
+        
+        # Режим массового удаления узлов мышкой
+        self.is_delete_node_mode = False
         
         # Отслеживание позиции мыши для хоткеев
         self.last_mouse_x = 0
@@ -54,11 +58,9 @@ class CamApp:
         self._build_ui()
         self.refresh_comboboxes()
         
-        # Бинды на удаление вектора
+        # Бинды на клавиатуру
         self.root.bind("<Delete>", self.on_delete_key)
         self.root.bind("<BackSpace>", self.on_delete_key)
-        
-        # Общий бинд на нажатие любой клавиши (для обработки I, D, R на разных раскладках)
         self.root.bind("<Key>", self.on_key_press)
 
     def refresh_comboboxes(self):
@@ -126,11 +128,22 @@ class CamApp:
                     "• [ I ]: Добавить узел на линии\n" \
                     "• [ D ]: Удалить узел\n" \
                     "• [ R ]: Разрезать/Удалить отрезок\n" \
-                    "• [ Delete ]: Удалить весь контур"
+                    "• [ C ]: Замкнуть выделенный контур\n" \
+                    "• [ J ]: Сшить два разных вектора"
         tk.Label(frame_edit, text=help_text, fg="#333333", font=("Arial", 9, "bold"), justify=tk.LEFT).pack(anchor=tk.W, pady=(0, 5))
         
+        # --- НОВЫЕ КНОПКИ ДЛЯ УДАЛЕНИЯ ---
+        btn_frame_edit = tk.Frame(frame_edit)
+        btn_frame_edit.pack(fill=tk.X, pady=2)
+        self.btn_delete_path = tk.Button(btn_frame_edit, text="🗑 Удалить контур", bg="#e0e0e0", command=lambda: self.on_delete_key(None))
+        self.btn_delete_path.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        
+        self.btn_delete_node = tk.Button(btn_frame_edit, text="❌ Режим: Удалить узел", bg="#e0e0e0", command=self.toggle_delete_node_mode)
+        self.btn_delete_node.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+        # ---------------------------------
+        
         self.btn_live_edit = tk.Button(frame_edit, text="✏️ Открыть в Inkscape (Live Edit)", bg="#FFB6C1", font=("Arial", 9, "bold"), command=self.do_live_edit)
-        self.btn_live_edit.pack(fill=tk.X, pady=2)
+        self.btn_live_edit.pack(fill=tk.X, pady=(5, 2))
 
         frame_export = tk.LabelFrame(self.frame_left, text="4. Производство (Экспорт)", padx=10, pady=10)
         frame_export.pack(fill=tk.X, pady=5)
@@ -204,6 +217,9 @@ class CamApp:
 
     # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
     def toggle_measure(self):
+        if self.is_delete_node_mode:
+            self.toggle_delete_node_mode()
+            
         self.is_measuring = not self.is_measuring
         if self.is_measuring: 
             self.btn_measure.config(bg="#FFD700", relief=tk.SUNKEN)
@@ -215,6 +231,23 @@ class CamApp:
             self.canvas.config(cursor="crosshair")
             self.measure_pt1 = None
             self.canvas.delete("measure_dynamic")
+
+    def toggle_delete_node_mode(self):
+        """Включает/выключает режим массового удаления узлов мышкой."""
+        if self.is_measuring:
+            self.toggle_measure()
+            
+        self.is_delete_node_mode = not self.is_delete_node_mode
+        if self.is_delete_node_mode:
+            self.btn_delete_node.config(bg="#FF6347", fg="white", relief=tk.SUNKEN)
+            self.canvas.config(cursor="X_cursor")
+            self.selected_path = None # Сбросим выделение для удобства
+            self.render_canvas()
+            self.log("Режим удаления узлов Включен (Кликайте ЛКМ по узлам).")
+        else:
+            self.btn_delete_node.config(bg="#e0e0e0", fg="black", relief=tk.RAISED)
+            self.canvas.config(cursor="crosshair")
+            self.log("Режим удаления узлов Выключен.")
 
     def screen_to_world(self, sx, sy):
         if self.current_scale == 0: return 0, 0
@@ -266,13 +299,29 @@ class CamApp:
                     closest_path = path
         return closest_path
 
+    def get_any_node_at(self, sx, sy, radius=15):
+        wx, wy = self.screen_to_world(sx, sy)
+        visible_paths = self.get_visible_paths()
+        best_dist = float('inf')
+        best_match = None
+        
+        world_radius = radius / self.current_scale if self.current_scale > 0 else 0
+        
+        for path in visible_paths:
+            for i, pt in enumerate(path.points):
+                dist = math.hypot(pt[0] - wx, pt[1] - wy)
+                if dist < best_dist and dist <= world_radius:
+                    best_dist = dist
+                    best_match = (path, i)
+        return best_match
+
     def invalidate_downstream(self):
         self.mask_geom = None
         self.layers["mask"], self.layers["ideal"], self.layers["cnc"] = [], [], []
         self.btn_mask.config(state=tk.DISABLED)
         self.btn_cnc.config(state=tk.DISABLED)
 
-    def get_node_at(self, sx, sy, radius=6):
+    def get_node_at(self, sx, sy, radius=10):
         if not self.selected_path: return None
         for i, pt in enumerate(self.selected_path.points):
             px = pt[0] * self.current_scale + self.current_tx
@@ -281,7 +330,7 @@ class CamApp:
                 return i
         return None
 
-    def get_segment_at(self, sx, sy, radius=5):
+    def get_segment_at(self, sx, sy, radius=10):
         if not self.selected_path or len(self.selected_path.points) < 2: return None, None
         wx, wy = self.screen_to_world(sx, sy)
         world_radius = radius / self.current_scale if self.current_scale > 0 else 0
@@ -318,6 +367,10 @@ class CamApp:
     # --- ХОТКЕИ (KEYBOARD SHORTCUTS) ---
     def on_delete_key(self, event):
         if not self.selected_path: return
+        
+        if self.weld_anchor and self.weld_anchor[0] == self.selected_path:
+            self.weld_anchor = None
+            
         if self.selected_path in self.raw_paths: self.raw_paths.remove(self.selected_path)
         if self.selected_path in self.ready_paths: self.ready_paths.remove(self.selected_path)
         for layer_paths in self.layers.values():
@@ -328,22 +381,38 @@ class CamApp:
         self.log("Вектор удален вручную.")
 
     def on_key_press(self, event):
-        # Игнорируем нажатия, если фокус находится в поле ввода (Entry или Text)
         if isinstance(event.widget, (tk.Entry, tk.Text)):
             return
-            
         char = getattr(event, 'char', '').lower()
         
-        if char in ('i', 'ш'):
-            self.on_key_insert_node()
-        elif char in ('d', 'в'):
-            self.on_key_delete_node()
-        elif char in ('r', 'к'):
-            self.on_key_remove_segment()
+        if char in ('i', 'ш'): self.on_key_insert_node()
+        elif char in ('d', 'в'): self.on_key_delete_node()
+        elif char in ('r', 'к'): self.on_key_remove_segment()
+        elif char in ('j', 'о'): self.on_key_join_nodes()
+        elif char in ('c', 'с'): self.on_key_close_path()
+
+    def on_key_close_path(self):
+        if self.is_measuring or not self.selected_path: return
+        if self.selected_path.is_closed:
+            self.log("Контур уже замкнут.")
+            return
+
+        pts = self.selected_path.points
+        if len(pts) > 2:
+            dist = math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1])
+            if dist > 1e-4:
+                first_pt = pts[0]
+                new_pt = (first_pt[0], first_pt[1], first_pt[2]) if len(first_pt) > 2 else (first_pt[0], first_pt[1])
+                self.selected_path.points.append(new_pt)
+
+        self.selected_path.is_closed = True
+        self.invalidate_downstream()
+        self.render_canvas()
+        self.log("Успех: Выделенный контур замкнут (клавиша C).")
 
     def on_key_insert_node(self):
         if self.is_measuring or not self.selected_path: return
-        seg_i, proj_pt = self.get_segment_at(self.last_mouse_x, self.last_mouse_y)
+        seg_i, proj_pt = self.get_segment_at(self.last_mouse_x, self.last_mouse_y, radius=10)
         if seg_i is not None and proj_pt:
             new_pt = (proj_pt[0], proj_pt[1])
             self.selected_path.points.insert(seg_i + 1, new_pt)
@@ -353,10 +422,9 @@ class CamApp:
 
     def on_key_delete_node(self):
         if self.is_measuring or not self.selected_path: return
-        if self.hovered_node_idx is not None:
-            idx = self.hovered_node_idx
+        idx = self.get_node_at(self.last_mouse_x, self.last_mouse_y, radius=10)
+        if idx is not None:
             self.selected_path.points.pop(idx)
-            self.hovered_node_idx = None
             if len(self.selected_path.points) < 2:
                 self.on_delete_key(None)
             else:
@@ -366,34 +434,25 @@ class CamApp:
 
     def on_key_remove_segment(self):
         if self.is_measuring or not self.selected_path: return
-        seg_i, _ = self.get_segment_at(self.last_mouse_x, self.last_mouse_y)
+        seg_i, _ = self.get_segment_at(self.last_mouse_x, self.last_mouse_y, radius=10)
         if seg_i is None: return
 
         pts = self.selected_path.points.copy()
         
         if self.selected_path.is_closed:
-            # БАГФИКС: Очищаем дублирующуюся точку замыкания, если она есть
             if len(pts) > 2 and math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) < 1e-4:
                 pts.pop()
-            
             self.selected_path.is_closed = False
-            
-            # Защита индекса
-            if seg_i >= len(pts):
-                seg_i = len(pts) - 1
-                
+            if seg_i >= len(pts): seg_i = len(pts) - 1
             self.selected_path.points = pts[seg_i+1:] + pts[:seg_i+1]
             self.log("Замкнутый контур разорван.")
         else:
             pts1 = pts[:seg_i+1]
             pts2 = pts[seg_i+1:]
-            
             target_list = self.ready_paths if self.selected_path in self.ready_paths else self.raw_paths
             layer_name = self.selected_path.layer_name
             
-            if self.selected_path in target_list:
-                target_list.remove(self.selected_path)
-                
+            if self.selected_path in target_list: target_list.remove(self.selected_path)
             target_layer = self.layers.get("raw")
             for layer_paths in self.layers.values():
                 if self.selected_path in layer_paths:
@@ -402,7 +461,6 @@ class CamApp:
                     break
             
             self.selected_path = None
-            self.hovered_node_idx = None
             
             if len(pts1) >= 2:
                 cp1 = CamPath(points=pts1, is_closed=False, layer_name=layer_name)
@@ -419,16 +477,84 @@ class CamApp:
         self.invalidate_downstream()
         self.render_canvas()
 
+    def on_key_join_nodes(self):
+        if self.is_measuring: return
+        
+        match = self.get_any_node_at(self.last_mouse_x, self.last_mouse_y, radius=15)
+        if not match:
+            self.log("Ошибка: Наведите курсор ближе к узлу контура.")
+            return
+            
+        p2, idx2 = match
+        
+        if p2.is_closed:
+            self.log("Ошибка: Выбранный контур уже замкнут.")
+            return
+            
+        is_end2 = (idx2 == len(p2.points) - 1)
+        is_start2 = (idx2 == 0)
+        
+        if not (is_start2 or is_end2):
+            self.log("Ошибка: Сшивать можно только начальные или конечные точки контура.")
+            return
+            
+        if self.weld_anchor is None:
+            self.weld_anchor = (p2, idx2)
+            self.log("Точка 1 зафиксирована. Наведите на вторую точку и нажмите J.")
+            self.render_canvas()
+            return
+            
+        p1, idx1 = self.weld_anchor
+        
+        if p1 not in self.get_visible_paths():
+            self.weld_anchor = (p2, idx2)
+            self.log("Предыдущая точка была удалена. Зафиксирована новая точка 1.")
+            self.render_canvas()
+            return
+
+        if p1 == p2:
+            self.log("Ошибка: Для замыкания одного контура используйте клавишу C.")
+            self.weld_anchor = None
+            self.render_canvas()
+            return
+        else:
+            is_end1 = (idx1 == len(p1.points) - 1)
+            is_start1 = (idx1 == 0)
+            
+            pts1 = p1.points.copy()
+            pts2 = p2.points.copy()
+            
+            if is_end1 and is_start2: merged = pts1 + pts2
+            elif is_end1 and is_end2:
+                pts2.reverse()
+                merged = pts1 + pts2
+            elif is_start1 and is_end2: merged = pts2 + pts1
+            elif is_start1 and is_start2:
+                pts1.reverse()
+                merged = pts1 + pts2
+                
+            p1.points = merged
+            
+            if p2 in self.raw_paths: self.raw_paths.remove(p2)
+            if p2 in self.ready_paths: self.ready_paths.remove(p2)
+            for layer_paths in self.layers.values():
+                if p2 in layer_paths: layer_paths.remove(p2)
+                
+            self.selected_path = p1
+            self.log("Успех: Два вектора сшиты в один!")
+            
+        self.weld_anchor = None
+        self.invalidate_downstream()
+        self.render_canvas()
+
     # --- ОБРАБОТКА СОБЫТИЙ МЫШИ ---
     def on_left_click(self, event):
-        # БАГФИКС: Принудительно обновляем координаты мыши при клике для хоткеев
         self.last_mouse_x = event.x
         self.last_mouse_y = event.y
-        
-        # Забираем фокус у полей ввода
         self.canvas.focus_set()
         
         self.canvas_h = self.canvas.winfo_height()
+        
         if self.is_measuring:
             wx, wy, snapped_pt, _ = self.get_snapped_coords(event.x, event.y)
             if not self.measure_pt1: 
@@ -443,14 +569,29 @@ class CamApp:
                 self.canvas.create_oval(sx-3, sy-3, sx+3, sy+3, fill="#00FF00", tags="measure_dynamic")
             return
             
-        # Проверяем, кликнули ли мы по узлу выделенного вектора
+        # НОВАЯ ЛОГИКА: Режим удаления узлов
+        if self.is_delete_node_mode:
+            match = self.get_any_node_at(event.x, event.y, radius=10)
+            if match:
+                path, idx = match
+                path.points.pop(idx)
+                if len(path.points) < 2:
+                    if path in self.raw_paths: self.raw_paths.remove(path)
+                    if path in self.ready_paths: self.ready_paths.remove(path)
+                    for layer_paths in self.layers.values():
+                        if path in layer_paths: layer_paths.remove(path)
+                    if self.selected_path == path: self.selected_path = None
+                self.invalidate_downstream()
+                self.render_canvas()
+                self.log("Узел удален кликом.")
+            return
+            
         if self.selected_path:
             node_idx = self.get_node_at(event.x, event.y)
             if node_idx is not None:
                 self.selected_node_idx = node_idx
                 return
 
-        # Иначе просто выделяем вектор или начинаем панорамирование
         clicked_path = self.get_closest_path(event.x, event.y)
         if clicked_path != self.selected_path:
             self.selected_path = clicked_path
@@ -465,12 +606,17 @@ class CamApp:
         if self.is_measuring and self.measure_pt1: 
             self.measure_pt1 = None
             self.canvas.delete("measure_dynamic")
+        elif self.is_delete_node_mode:
+            self.toggle_delete_node_mode()
+        elif self.weld_anchor:
+            self.weld_anchor = None
+            self.log("Сварка отменена.")
+            self.render_canvas()
         else:
             self.selected_path = None
             self.render_canvas()
 
     def on_mouse_move(self, event):
-        # Обновляем координаты для хоткеев
         self.last_mouse_x = event.x
         self.last_mouse_y = event.y
         
@@ -487,7 +633,6 @@ class CamApp:
             self.canvas.create_text(event.x + 15, event.y - 15, text=f"{dist:.3f} мм", fill="#FFD700", font=("Arial", 11, "bold"), anchor=tk.SW, tags="measure_dynamic")
             return
             
-        # Подсветка узла при наведении
         if self.selected_path and self.selected_node_idx is None:
             hover_idx = self.get_node_at(event.x, event.y)
             if hover_idx != self.hovered_node_idx:
@@ -506,9 +651,8 @@ class CamApp:
                 self.canvas.tag_raise(text_id)
 
     def on_pan_move(self, event):
-        if self.is_measuring: return 
+        if self.is_measuring or self.is_delete_node_mode: return 
         
-        # Перетаскивание узла
         if self.selected_node_idx is not None and self.selected_path:
             wx, wy = self.screen_to_world(event.x, event.y)
             old_pt = self.selected_path.points[self.selected_node_idx]
@@ -592,7 +736,6 @@ class CamApp:
                         else:
                             self.canvas.create_line(coords, fill=draw_color, width=draw_width, capstyle=tk.ROUND)
                             
-                    # Отрисовка узлов для выделенного вектора
                     if is_selected:
                         for i, pt in enumerate(path.points):
                             nx = pt[0] * self.current_scale + self.current_tx
@@ -600,6 +743,14 @@ class CamApp:
                             fill_color = "#FF0000" if self.hovered_node_idx == i else "#FFFFFF"
                             self.canvas.create_rectangle(nx-3, ny-3, nx+3, ny+3, fill=fill_color, outline="#FF4500", tags="node")
         
+        if self.weld_anchor:
+            wp, w_idx = self.weld_anchor
+            if wp in self.get_visible_paths() and w_idx < len(wp.points):
+                pt = wp.points[w_idx]
+                nx = pt[0] * self.current_scale + self.current_tx
+                ny = self.canvas_h - (pt[1] * self.current_scale + self.current_ty)
+                self.canvas.create_oval(nx-6, ny-6, nx+6, ny+6, outline="#00FF00", width=2, tags="weld_anchor")
+
         colors = {"red": "#FF0000", "orange": "#FFA500", "magenta": "#FF00FF", "yellow": "#FFFF00"}
         for k, pts in self.error_markers.items():
             for x, y in pts:
@@ -654,6 +805,7 @@ class CamApp:
             
             if new_paths:
                 self.selected_path = None
+                self.weld_anchor = None
                 if self.ready_paths:
                     self.ready_paths = new_paths
                     self.layers["healed"] = new_paths
@@ -681,6 +833,7 @@ class CamApp:
         self.raw_paths = self._run_with_redirect(CamPipeline().step1_parse, self.input_filepath)
         if self.raw_paths:
             self.selected_path = None
+            self.weld_anchor = None
             self.layers["raw"] = self.raw_paths; self.layers["healed"], self.layers["mask"], self.layers["ideal"], self.layers["cnc"] = [], [], [], []
             self.mask_geom = None
             self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
@@ -703,6 +856,7 @@ class CamApp:
         self.ready_paths = self._run_with_redirect(CamPipeline(tolerance=tol, min_loop_area=loop_area).step3_heal_and_optimize, self.ready_paths if self.ready_paths else self.raw_paths)
         if self.ready_paths:
             self.selected_path = None
+            self.weld_anchor = None
             self.layers["healed"] = self.ready_paths; self.render_canvas()
             self.btn_mask.config(state=tk.NORMAL); self.btn_cnc.config(state=tk.NORMAL)
             if self.current_project_dir: self._run_with_redirect(CamPipeline().save_source_dxf, self.ready_paths, self.current_project_dir / "02_Вылеченный_Мастер.dxf")
@@ -711,6 +865,7 @@ class CamApp:
         if not self.raw_paths: return
         self.ready_paths, self.mask_geom = [], None
         self.selected_path = None
+        self.weld_anchor = None
         self.layers["healed"], self.layers["mask"], self.layers["ideal"], self.layers["cnc"] = [], [], [], []
         self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
         self.render_canvas(); self.btn_mask.config(state=tk.DISABLED); self.btn_cnc.config(state=tk.DISABLED)
@@ -737,6 +892,7 @@ class CamApp:
         self.raw_paths, self.ready_paths = [], []
         self.mask_geom = None
         self.selected_path = None
+        self.weld_anchor = None
         self.layers = {"raw": [], "healed": [], "mask": [], "ideal": [], "cnc": []}
         self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
         self.show_raw.set(True); self.show_healed.set(True); self.show_mask.set(True); self.show_ideal.set(False); self.show_cnc.set(True)
