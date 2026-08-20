@@ -25,15 +25,16 @@ from src.compiler.gcode_compiler import GCodeCompiler
 from src.compiler.tool import VBitTool
 from src.parser.geometry import CamPath
 
+# ИМПОРТ НАШИХ НОВЫХ БАЗ ДАННЫХ
+from src.db.models import Tool, PostProcessor
+
 class CamPipeline:
-    def __init__(self, tolerance: float = 0.01, feedrate: int = 1500, min_loop_area: float = 0.0):
+    def __init__(self, tolerance: float = 0.01, min_loop_area: float = 0.0):
         self.tolerance = tolerance
-        self.feedrate = feedrate
         self.min_loop_area = min_loop_area
         self.healer = MorphologicalHealer(tolerance=tolerance, min_loop_area=min_loop_area)
         self.optimizer = TopologicalOptimizer(simplify_tolerance=0.001)
         self.nesting = NestingOptimizer()
-        self.compiler = GCodeCompiler(feedrate=feedrate)
 
     def step1_parse(self, input_path: str | Path) -> list[CamPath]:
         input_file = Path(input_path)
@@ -132,7 +133,6 @@ class CamPipeline:
                 pts_2d = [(pt[0], pt[1]) for pt in p.points]
                 lines.append(LineString(pts_2d))
                 
-        # ИСПРАВЛЕНИЕ: mitre_limit=50.0 и simplify(0.001) для маски
         mask_geom = MultiLineString(lines).buffer(offset_val, cap_style=2, join_style=2, mitre_limit=50.0).simplify(0.001, preserve_topology=True) if lines else Polygon()
 
         pure_mask_paths = []
@@ -252,17 +252,19 @@ class CamPipeline:
             
         return mask_visual_paths, pure_mask_paths, mask_geom
 
-    def generate_gcode(self, mask_geom, output_path: str | Path, angle: float, tip: float, depth: float, step_down: float, mask_offset: float, enable_sharpening: bool) -> tuple[list[CamPath], list[CamPath]]:
+    def generate_gcode(self, mask_geom, output_path: str | Path, tool_obj: Tool, post_obj: PostProcessor, mask_offset: float, enable_sharpening: bool) -> tuple[list[CamPath], list[CamPath]]:
         print("[ЧПУ] Расчет Идеального лезвия и эквидистант от УФ-Маски...")
         
-        tool = VBitTool(angle_deg=angle, tip_diameter=tip, depth=depth)
-        print(f"      Инструмент: V-фреза {angle}°, Пятно={tip}мм, Z={depth}мм, Шаг={step_down}мм")
+        tool = VBitTool(tool_obj)
+        print(f"      Инструмент: {tool_obj.name} ({tool_obj.angle_deg}°, Пятно={tool_obj.tip_diameter}мм, Z={tool_obj.depth}мм, Шаг={tool_obj.step_down}мм)")
         print(f"      Радиус смещения (R_eff): {tool.offset_radius:.4f} мм")
         
         ideal_paths, cnc_paths = self.nesting.process_mask_geometry(mask_geom, mask_offset, tool.offset_radius, tool.depth, enable_sharpening)
         
         print(f"[ЧПУ] Генерация G-кода (Подрезка: {'ВКЛ' if enable_sharpening else 'ВЫКЛ'})...")
-        gcode_text = self.compiler.compile(cnc_paths, depth=-tool.depth, step_down=step_down)
+        
+        compiler = GCodeCompiler(tool=tool_obj, postprocessor=post_obj)
+        gcode_text = compiler.compile(cnc_paths)
         
         with open(output_path, "w", encoding="utf-8") as f: 
             f.write(gcode_text)

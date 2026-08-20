@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 import sys
 import math
@@ -8,6 +8,7 @@ import datetime
 
 from src.pipeline.cam_pipeline import CamPipeline
 from src.parser.geometry import CamPath
+from src.db.db_manager import DatabaseManager
 
 class CamApp:
     def __init__(self, root: tk.Tk):
@@ -33,7 +34,37 @@ class CamApp:
         self.current_scale, self.current_tx, self.current_ty, self.canvas_h = 1.0, 0.0, 0.0, 0
         self.is_measuring, self.measure_pt1 = False, None 
         self.current_project_dir = None 
+        
+        # Подключаем Базу Данных
+        self.db = DatabaseManager()
+        self.tools_list = []
+        self.posts_list = []
+        
         self._build_ui()
+        self.refresh_comboboxes()
+
+    def refresh_comboboxes(self):
+        """Обновляет выпадающие списки инструментов и постпроцессоров."""
+        self.tools_list = self.db.load_tools()
+        self.posts_list = self.db.load_postprocessors()
+        
+        self.combo_tool['values'] = [t.name for t in self.tools_list]
+        if self.tools_list: self.combo_tool.current(0)
+            
+        self.combo_post['values'] = [p.name for p in self.posts_list]
+        if self.posts_list: self.combo_post.current(0)
+
+    def open_tool_manager(self):
+        from src.gui.tool_manager import ToolManagerWindow
+        win = ToolManagerWindow(self.root)
+        self.root.wait_window(win)
+        self.refresh_comboboxes()
+
+    def open_postprocessor_manager(self):
+        from src.gui.postprocessor_manager import PostprocessorManagerWindow
+        win = PostprocessorManagerWindow(self.root)
+        self.root.wait_window(win)
+        self.refresh_comboboxes()
 
     def _build_ui(self):
         self.frame_left = tk.Frame(self.root, width=450)
@@ -76,7 +107,7 @@ class CamApp:
         
         tk.Label(frame_export, text="Компенсация подтравливания (Офсет, мм):", fg="blue", font=("Arial", 9, "bold")).pack(anchor=tk.W)
         self.entry_offset = tk.Entry(frame_export, width=15, bg="#E6F2FF")
-        self.entry_offset.insert(0, "0.2") # <--- ИЗМЕНЕНО ЗДЕСЬ
+        self.entry_offset.insert(0, "0.2")
         self.entry_offset.pack(anchor=tk.W, pady=(0, 5))
         
         tk.Label(frame_export, text="Реперные метки D / Отступ (мм):").pack(anchor=tk.W)
@@ -88,33 +119,26 @@ class CamApp:
         self.btn_mask = tk.Button(frame_export, text="🖨 Создать УФ-Маску (.PDF)", bg="#9370DB", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.export_uv_mask)
         self.btn_mask.pack(fill=tk.X, pady=(0, 10))
         
-        frame_cnc_tools = tk.LabelFrame(frame_export, text="🛠 Настройки Фрезы и Гравировки", padx=5, pady=5, bg="#f9f9f9")
+        # --- НОВЫЙ БЛОК ЧПУ (Базы данных) ---
+        frame_cnc_tools = tk.LabelFrame(frame_export, text="🛠 Настройки ЧПУ", padx=5, pady=5, bg="#f9f9f9")
         frame_cnc_tools.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Label(frame_cnc_tools, text="📐 Угол (°):", bg="#f9f9f9", fg="#333", font=("Arial", 8)).grid(row=0, column=0, sticky=tk.W, pady=2)
-        self.entry_cnc_angle = tk.Entry(frame_cnc_tools, width=6); self.entry_cnc_angle.insert(0, "60.0")
-        self.entry_cnc_angle.grid(row=0, column=1, padx=5, pady=2)
-        
-        tk.Label(frame_cnc_tools, text="🎯 Пятно (мм):", bg="#f9f9f9", fg="#333", font=("Arial", 8)).grid(row=0, column=2, sticky=tk.W, pady=2)
-        self.entry_cnc_tip = tk.Entry(frame_cnc_tools, width=6); self.entry_cnc_tip.insert(0, "0.1")
-        self.entry_cnc_tip.grid(row=0, column=3, padx=5, pady=2)
-        
-        tk.Label(frame_cnc_tools, text="⏬ Глуб. Z (мм):", bg="#f9f9f9", fg="#333", font=("Arial", 8)).grid(row=1, column=0, sticky=tk.W, pady=2)
-        self.entry_cnc_depth = tk.Entry(frame_cnc_tools, width=6); self.entry_cnc_depth.insert(0, "0.5")
-        self.entry_cnc_depth.grid(row=1, column=1, padx=5, pady=2)
-        
-        tk.Label(frame_cnc_tools, text="🪜 Шаг Z (мм):", bg="#f9f9f9", fg="#333", font=("Arial", 8)).grid(row=1, column=2, sticky=tk.W, pady=2)
-        self.entry_cnc_step = tk.Entry(frame_cnc_tools, width=6); self.entry_cnc_step.insert(0, "0.2")
-        self.entry_cnc_step.grid(row=1, column=3, padx=5, pady=2)
+        tk.Label(frame_cnc_tools, text="Инструмент:", bg="#f9f9f9", font=("Arial", 9)).grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.combo_tool = ttk.Combobox(frame_cnc_tools, state="readonly", width=22)
+        self.combo_tool.grid(row=0, column=1, padx=5, pady=2)
+        tk.Button(frame_cnc_tools, text="⚙️", command=self.open_tool_manager).grid(row=0, column=2, padx=2)
 
-        tk.Checkbutton(frame_cnc_tools, text="🔪 3D-Подрезка (Только внутр. углы)", bg="#f9f9f9", fg="#FF4500", font=("Arial", 9, "bold"), variable=self.enable_sharpening).grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        tk.Label(frame_cnc_tools, text="Постпроцессор:", bg="#f9f9f9", font=("Arial", 9)).grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.combo_post = ttk.Combobox(frame_cnc_tools, state="readonly", width=22)
+        self.combo_post.grid(row=1, column=1, padx=5, pady=2)
+        tk.Button(frame_cnc_tools, text="⚙️", command=self.open_postprocessor_manager).grid(row=1, column=2, padx=2)
 
-        tk.Label(frame_export, text="⚡ Скорость реза ЧПУ (F):").pack(anchor=tk.W)
-        self.entry_feedrate = tk.Entry(frame_export, width=15); self.entry_feedrate.insert(0, "1500"); self.entry_feedrate.pack(anchor=tk.W, pady=(0, 5))
-        
+        tk.Checkbutton(frame_cnc_tools, text="🔪 3D-Подрезка (Только внутр. углы)", bg="#f9f9f9", fg="#FF4500", font=("Arial", 9, "bold"), variable=self.enable_sharpening).grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(5,0))
+
         self.btn_cnc = tk.Button(frame_export, text="⚙️ Сгенерировать УП (.TXT)", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.export_cnc)
         self.btn_cnc.pack(fill=tk.X, pady=2)
 
+        # Логи
         frame_log = tk.LabelFrame(self.frame_left, text="Лог работы", padx=10, pady=5)
         frame_log.pack(fill=tk.BOTH, expand=True)
         frame_log_btns = tk.Frame(frame_log)
@@ -244,18 +268,24 @@ class CamApp:
             
         try: 
             offset = float(self.entry_offset.get())
-            f_rate = int(self.entry_feedrate.get())
-            angle = float(self.entry_cnc_angle.get())
-            tip = float(self.entry_cnc_tip.get())
-            depth = float(self.entry_cnc_depth.get())
-            step_z = float(self.entry_cnc_step.get())
         except ValueError: 
-            return messagebox.showerror("Ошибка", "Неверный формат чисел в настройках инструмента ЧПУ!")
+            return messagebox.showerror("Ошибка", "Неверный формат офсета!")
             
-        cnc_file = self.current_project_dir / "ЧПУ" / "04_УП_Фрезер.txt"
+        idx_tool = self.combo_tool.current()
+        idx_post = self.combo_post.current()
+        
+        if idx_tool < 0 or idx_post < 0:
+            return messagebox.showerror("Ошибка", "Выберите инструмент и постпроцессор!")
+            
+        selected_tool = self.tools_list[idx_tool]
+        selected_post = self.posts_list[idx_post]
+        
+        ext = selected_post.extension
+        if not ext.startswith('.'): ext = '.' + ext
+        cnc_file = self.current_project_dir / "ЧПУ" / f"04_УП_Фрезер{ext}"
         sharpen = self.enable_sharpening.get()
         
-        generated_paths = self._run_with_redirect(CamPipeline(feedrate=f_rate).generate_gcode, self.mask_geom, cnc_file, angle, tip, depth, step_z, offset, sharpen)
+        generated_paths = self._run_with_redirect(CamPipeline().generate_gcode, self.mask_geom, cnc_file, selected_tool, selected_post, offset, sharpen)
         
         if generated_paths:
             ideal_paths, cnc_paths = generated_paths
@@ -264,7 +294,7 @@ class CamApp:
             self.show_ideal.set(True)
             self.show_cnc.set(True)
             self.render_canvas()
-            messagebox.showinfo("Готово", "УП сохранена!")
+            messagebox.showinfo("Готово", f"УП сохранена как {cnc_file.name}!")
 
     def toggle_measure(self):
         self.is_measuring = not self.is_measuring
