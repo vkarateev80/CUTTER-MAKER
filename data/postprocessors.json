@@ -2,9 +2,19 @@
     {
         "id": "ec344b5a-5d1f-467b-b996-2a12f5c11cf8",
         "name": "GRBL (Standard)",
-        "extension": ".txt",
+        "extension": ".cnc",
         "header": "; --- НАЧАЛО ПРОГРАММЫ ---\nG21\nG90\nG0 Z{safe_z}",
         "footer": "; --- КОНЕЦ ПРОГРАММЫ ---\nG0 Z{safe_z}\nG0 X0.000 Y0.000\nM30",
+        "tool_on": "M3 S{rpm}",
+        "tool_off": "M5",
+        "safe_z": 5.0
+    },
+    {
+        "id": "cc16230d-c92d-4af8-8573-49022c6d0255",
+        "name": "Новый постпроцессор",
+        "extension": ".gcode",
+        "header": "; НАЧАЛО\nG21\nG90\nG0 Z{safe_z}",
+        "footer": "; КОНЕЦ\nG0 Z{safe_z}\nG0 X0 Y0\nM30",
         "tool_on": "M3 S{rpm}",
         "tool_off": "M5",
         "safe_z": 5.0

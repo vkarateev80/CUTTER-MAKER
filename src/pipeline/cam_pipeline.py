@@ -64,7 +64,7 @@ class CamPipeline:
         shapely_lines = []
         for path in paths:
             if path.layer_name == "CROP_MARKS": 
-                continue # Игнорируем обрезные метки при поиске ошибок
+                continue 
                 
             if len(path.points) < 2: continue
             line = LineString(path.points)
@@ -117,7 +117,6 @@ class CamPipeline:
 
     def step3_heal_and_optimize(self, paths: list[CamPath]) -> list[CamPath]:
         print(f"[ШАГ 3] Запуск морфологии...")
-        # Защита: отделяем обрезные метки, чтобы лекарь не слил их с макетом и не стер их слой
         regular_paths = [p for p in paths if p.layer_name != "CROP_MARKS"]
         crop_paths = [p for p in paths if p.layer_name == "CROP_MARKS"]
         
@@ -201,7 +200,6 @@ class CamPipeline:
         regular_lines = []
         crop_lines = []
         
-        # Разделяем основную геометрию и обрезные метки
         for p in paths:
             if len(p.points) > 1:
                 line = LineString([(pt[0], pt[1]) for pt in p.points])
@@ -210,10 +208,7 @@ class CamPipeline:
                 else:
                     regular_lines.append(line)
                 
-        # 1. Основная геометрия штампа (буфер = offset_val)
         mask_geom = MultiLineString(regular_lines).buffer(offset_val, cap_style=2, join_style=2, mitre_limit=50.0).simplify(0.001, preserve_topology=True) if regular_lines else Polygon()
-
-        # 2. Обрезные метки (жесткая толщина линии 0.1 мм -> радиус буфера 0.05 мм)
         crop_geom = MultiLineString(crop_lines).buffer(0.05, cap_style=2, join_style=2, mitre_limit=50.0).simplify(0.001, preserve_topology=True) if crop_lines else Polygon()
 
         pure_mask_paths = []
@@ -232,7 +227,6 @@ class CamPipeline:
 
         extract_pure_paths(mask_geom, pure_mask_paths, "MASK_EXTERIOR", "MASK_HOLE")
 
-        # 3. Реперные метки (строим только вокруг основного макета, игнорируя обрезные метки)
         regular_cam_paths = [p for p in paths if p.layer_name != "CROP_MARKS"]
         generator = AlignmentMarksGenerator(mark_diameter=mark_d, margin=mark_margin)
         fiducial_paths = generator.generate(regular_cam_paths)
@@ -242,7 +236,6 @@ class CamPipeline:
                 poly = Polygon(p.points)
                 if poly.is_valid: fiducial_polys.append(poly)
 
-        # Общий габарит для PDF (штамп + обрезные метки + реперные метки)
         total_geom = unary_union([mask_geom, crop_geom] + fiducial_polys)
         if total_geom.is_empty: raise ValueError("Геометрия пуста.")
 
@@ -315,20 +308,18 @@ class CamPipeline:
             try: safe_svg.unlink()
             except: pass
             
-        # Возвращаем ТОЛЬКО mask_geom (регулярную геометрию). 
-        # CNC получит только её и проигнорирует обрезные метки.
         return mask_visual_paths, pure_mask_paths, mask_geom
 
-    def generate_gcode(self, mask_geom, output_path: str | Path, tool_obj: Tool, post_obj: PostProcessor, mask_offset: float, enable_sharpening: bool) -> tuple[list[CamPath], list[CamPath]]:
-        print("[ЧПУ] Расчет Идеального лезвия и эквидистант от УФ-Маски...")
+    def generate_gcode(self, mask_geom, output_path: str | Path, tool_obj: Tool, post_obj: PostProcessor, mask_offset: float, enable_sharpening: bool, lead_radius: float = 0.0) -> tuple[list[CamPath], list[CamPath]]:
+        print(f"[ЧПУ] Расчет Идеального лезвия (Вход по дуге R={lead_radius}мм)...")
         tool = VBitTool(tool_obj)
         print(f"      Инструмент: {tool_obj.name} ({tool_obj.angle_deg}°, Пятно={tool_obj.tip_diameter}мм, Z={tool_obj.depth}мм, Шаг={tool_obj.step_down}мм)")
         print(f"      Радиус смещения (R_eff): {tool.offset_radius:.4f} мм")
         
         ideal_paths, cnc_paths = self.nesting.process_mask_geometry(mask_geom, mask_offset, tool.offset_radius, tool.depth, enable_sharpening)
-        print(f"[ЧПУ] Генерация G-кода (Подрезка: {'ВКЛ' if enable_sharpening else 'ВЫКЛ'})...")
         
         compiler = GCodeCompiler(tool=tool_obj, postprocessor=post_obj)
-        gcode_text = compiler.compile(cnc_paths)
+        gcode_text, ordered_cnc_paths = compiler.compile(cnc_paths, lead_radius)
         with open(output_path, "w", encoding="utf-8") as f: f.write(gcode_text)
-        return ideal_paths, cnc_paths
+        
+        return ideal_paths, ordered_cnc_paths

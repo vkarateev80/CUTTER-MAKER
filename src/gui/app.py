@@ -8,6 +8,7 @@ import datetime
 import tempfile
 import os
 import subprocess
+import threading
 
 from src.pipeline.cam_pipeline import CamPipeline
 from src.parser.geometry import CamPath
@@ -21,19 +22,23 @@ class CamApp:
         self.root.geometry("1400x900") 
         
         self.input_filepath = None
-        self.raw_paths, self.ready_paths, self.paths_to_draw = [], [], []
+        self.raw_paths = []
+        self.ready_paths = []
+        self.distorted_paths = []
         self.mask_geom = None 
         
-        self.layers = {"raw": [], "healed": [], "mask": [], "ideal": [], "cnc": []}
+        self.layers = {"raw": [], "healed": [], "distorted": [], "mask": [], "ideal": [], "cnc": []}
+        
         self.show_raw = tk.BooleanVar(value=True)
         self.show_healed = tk.BooleanVar(value=True)
+        self.show_distorted = tk.BooleanVar(value=False)
         self.show_mask = tk.BooleanVar(value=True)
         self.show_ideal = tk.BooleanVar(value=False)
         self.show_cnc = tk.BooleanVar(value=True)
+        self.show_rapids = tk.BooleanVar(value=True) 
         
         self.enable_sharpening = tk.BooleanVar(value=True)
         
-        # Переменные состояния дисторсии
         self.is_distorted = False
         self.applied_dist_axis = ""
         self.current_rapport = 0.0
@@ -67,6 +72,15 @@ class CamApp:
         self.root.bind("<BackSpace>", self.on_delete_key)
         self.root.bind("<Key>", self.on_key_press)
 
+    def _update_cnc_btn_text(self, event=None):
+        idx = self.combo_post.current()
+        if idx >= 0 and idx < len(self.posts_list):
+            ext = self.posts_list[idx].extension
+            if not ext.startswith('.'): ext = '.' + ext
+            self.btn_cnc.config(text=f"⚙️ Сгенерировать УП ({ext.upper()})")
+        else:
+            self.btn_cnc.config(text="⚙️ Сгенерировать УП")
+
     def refresh_comboboxes(self):
         self.tools_list = self.db.load_tools()
         self.posts_list = self.db.load_postprocessors()
@@ -76,6 +90,8 @@ class CamApp:
             
         self.combo_post['values'] = [p.name for p in self.posts_list]
         if self.posts_list: self.combo_post.current(0)
+        
+        self._update_cnc_btn_text()
 
     def open_tool_manager(self):
         from src.gui.tool_manager import ToolManagerWindow
@@ -92,6 +108,9 @@ class CamApp:
     def reset_distortion_state(self):
         self.is_distorted = False
         self.applied_dist_axis = ""
+        self.distorted_paths = []
+        self.layers["distorted"] = []
+        self.show_distorted.set(False)
         try:
             self.btn_apply_dist.config(text="Сжать", bg="#4169E1", state=tk.NORMAL)
         except AttributeError:
@@ -115,7 +134,6 @@ class CamApp:
         self.frame_right = tk.Frame(self.root)
         self.frame_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # 1. Проект
         frame_proj = tk.LabelFrame(self.frame_left, text="1. Управление Проектом", padx=10, pady=10)
         frame_proj.pack(fill=tk.X, pady=5)
         self.btn_create_proj = tk.Button(frame_proj, text="📁 СОЗДАТЬ ПРОЕКТ И ВЫБРАТЬ МАКЕТ", bg="#FFD700", font=("Arial", 10, "bold"), command=self.create_project)
@@ -123,7 +141,6 @@ class CamApp:
         self.lbl_proj_info = tk.Label(frame_proj, text="Проект не создан", fg="gray", justify=tk.LEFT, wraplength=400)
         self.lbl_proj_info.pack(anchor=tk.W)
 
-        # 2. Анализ и Лечение
         frame_prep = tk.LabelFrame(self.frame_left, text="2. Анализ и Лечение", padx=10, pady=10)
         frame_prep.pack(fill=tk.X, pady=5)
         
@@ -141,7 +158,6 @@ class CamApp:
         self.btn_step3 = tk.Button(frame_prep, text="ШАГ 3: Вылечить (Автосохранение)", bg="#87CEEB", font=("Arial", 9, "bold"), command=self.do_step3)
         self.btn_step3.pack(fill=tk.X, pady=2)
 
-        # --- БЛОК ОБРЕЗНЫХ МЕТОК ---
         frame_crop = tk.Frame(frame_prep)
         frame_crop.pack(fill=tk.X, pady=(6, 6))
         tk.Label(frame_crop, text="Ширина пластины:").pack(side=tk.LEFT)
@@ -150,12 +166,10 @@ class CamApp:
         self.entry_plate_width.pack(side=tk.LEFT, padx=5)
         self.btn_crop_marks = tk.Button(frame_crop, text="✂️ Добавить метки", bg="#FFDAB9", font=("Arial", 8, "bold"), command=self.do_add_crop_marks)
         self.btn_crop_marks.pack(side=tk.RIGHT, fill=tk.X, expand=True)
-        # ---------------------------
 
         self.btn_reset = tk.Button(frame_prep, text="↺ Сбросить к исходнику", bg="#FFDAB9", command=self.do_reset)
         self.btn_reset.pack(fill=tk.X, pady=(2, 0))
 
-        # 3. ДИСТОРСИЯ
         frame_dist = tk.LabelFrame(self.frame_left, text="3. Расчет Дисторсии (Сжатие)", padx=10, pady=10, bg="#F0F8FF")
         frame_dist.pack(fill=tk.X, pady=5)
         
@@ -203,7 +217,6 @@ class CamApp:
         self.btn_rotate = tk.Button(dist_btns, text="↻ Поворот 90°", bg="#e0e0e0", command=self.do_rotate_90)
         self.btn_rotate.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
 
-        # 4. Ручное Редактирование
         frame_edit = tk.LabelFrame(self.frame_left, text="4. Ручное Редактирование", padx=10, pady=10)
         frame_edit.pack(fill=tk.X, pady=5)
         
@@ -223,7 +236,6 @@ class CamApp:
         self.btn_live_edit = tk.Button(frame_edit, text="✏️ Открыть в Inkscape (Live Edit)", bg="#FFB6C1", font=("Arial", 9, "bold"), command=self.do_live_edit)
         self.btn_live_edit.pack(fill=tk.X, pady=(5, 2))
 
-        # 5. Экспорт
         frame_export = tk.LabelFrame(self.frame_left, text="5. Производство (Экспорт)", padx=10, pady=10)
         frame_export.pack(fill=tk.X, pady=5)
         
@@ -250,16 +262,27 @@ class CamApp:
         tk.Label(frame_cnc_tools, text="Постпроцессор:", bg="#f9f9f9", font=("Arial", 9)).grid(row=1, column=0, sticky=tk.W, pady=2)
         self.combo_post = ttk.Combobox(frame_cnc_tools, state="readonly", width=18)
         self.combo_post.grid(row=1, column=1, padx=5, pady=2)
+        self.combo_post.bind("<<ComboboxSelected>>", self._update_cnc_btn_text)
         tk.Button(frame_cnc_tools, text="⚙️", command=self.open_postprocessor_manager).grid(row=1, column=2, padx=2)
 
         tk.Checkbutton(frame_cnc_tools, text="🔪 3D-Подрезка углов", bg="#f9f9f9", fg="#FF4500", font=("Arial", 9, "bold"), variable=self.enable_sharpening).grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(5,0))
+        
+        # --- ИЗМЕНЕНИЕ: Новое поле для радиуса врезки ---
+        tk.Label(frame_cnc_tools, text="Вход/Выход по дуге R (мм):", bg="#f9f9f9", font=("Arial", 9)).grid(row=3, column=0, sticky=tk.W, pady=2)
+        self.entry_lead_radius = tk.Entry(frame_cnc_tools, width=10)
+        self.entry_lead_radius.insert(0, "1.5")
+        self.entry_lead_radius.grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
+        # ------------------------------------------------
 
-        self.btn_cnc = tk.Button(frame_export, text="⚙️ Сгенерировать УП (.TXT)", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.export_cnc)
+        self.btn_cnc = tk.Button(frame_export, text="⚙️ Сгенерировать УП", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.export_cnc)
         self.btn_cnc.pack(fill=tk.X, pady=2)
 
-        # Логи
         frame_log = tk.LabelFrame(self.frame_left, text="Лог работы", padx=10, pady=5)
         frame_log.pack(fill=tk.BOTH, expand=True)
+        
+        self.progress = ttk.Progressbar(frame_log, orient="horizontal", mode="indeterminate")
+        self.progress.pack(fill=tk.X, pady=(0, 5))
+        
         frame_log_btns = tk.Frame(frame_log)
         frame_log_btns.pack(fill=tk.X, pady=(0, 5))
         self.btn_clear_log = tk.Button(frame_log_btns, text="🗑 Очистить", command=self.clear_logs); self.btn_clear_log.pack(side=tk.RIGHT, padx=(5, 0))
@@ -267,7 +290,6 @@ class CamApp:
         self.text_log = tk.Text(frame_log, height=6, width=40, state=tk.DISABLED, bg="#f0f0f0")
         self.text_log.pack(fill=tk.BOTH, expand=True)
 
-        # Правая часть (Тулбар и Canvas с Линейками)
         frame_tools = tk.Frame(self.frame_right)
         frame_tools.pack(fill=tk.X, pady=(0, 5))
         self.btn_measure = tk.Button(frame_tools, text="📏 Замер", bg="#e0e0e0", command=self.toggle_measure); self.btn_measure.pack(side=tk.LEFT)
@@ -276,11 +298,12 @@ class CamApp:
         
         tk.Checkbutton(frame_layers, text="Исходник", fg="#555555", font=("Arial", 9, "bold"), variable=self.show_raw, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
         tk.Checkbutton(frame_layers, text="Вылеченный", fg="#008888", font=("Arial", 9, "bold"), variable=self.show_healed, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
+        tk.Checkbutton(frame_layers, text="Сжатый", fg="#1E90FF", font=("Arial", 9, "bold"), variable=self.show_distorted, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
         tk.Checkbutton(frame_layers, text="Маска", fg="#880088", font=("Arial", 9, "bold"), variable=self.show_mask, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
         tk.Checkbutton(frame_layers, text="Лезвие", fg="#CCCC00", font=("Arial", 9, "bold"), variable=self.show_ideal, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
         tk.Checkbutton(frame_layers, text="УП (ЧПУ)", fg="#008800", font=("Arial", 9, "bold"), variable=self.show_cnc, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
+        tk.Checkbutton(frame_layers, text="Холостые (G0)", fg="#FF8C00", font=("Arial", 9, "bold"), variable=self.show_rapids, command=self.render_canvas).pack(side=tk.LEFT, padx=10)
 
-        # Окно предпросмотра с линейками (Grid Layout)
         frame_canvas = tk.LabelFrame(self.frame_right, text="Предпросмотр (ЛКМ - Выделить/Двигать | Колесико - Масштаб)", padx=5, pady=5)
         frame_canvas.pack(fill=tk.BOTH, expand=True)
         
@@ -311,6 +334,84 @@ class CamApp:
 
         self._bind_mouse_scroll(self.frame_left_container)
         self._bind_mouse_scroll(self.frame_left)
+
+    def _lock_ui(self):
+        buttons = [self.btn_step1, self.btn_step2, self.btn_step3, self.btn_crop_marks, self.btn_reset, 
+                   self.btn_apply_dist, self.btn_rotate, self.btn_live_edit, self.btn_mask, self.btn_cnc, 
+                   self.btn_create_proj, self.btn_measure, self.btn_delete_path, self.btn_delete_node,
+                   self.btn_clear_log, self.btn_copy_log]
+        for btn in buttons:
+            try: btn.config(state=tk.DISABLED)
+            except: pass
+        self.canvas.config(cursor="watch")
+        self.root.update_idletasks()
+
+    def _unlock_ui(self):
+        buttons = [self.btn_step1, self.btn_step2, self.btn_step3, self.btn_crop_marks, self.btn_reset, 
+                   self.btn_apply_dist, self.btn_rotate, self.btn_live_edit, self.btn_create_proj, 
+                   self.btn_measure, self.btn_delete_path, self.btn_delete_node,
+                   self.btn_clear_log, self.btn_copy_log]
+        for btn in buttons:
+            try: btn.config(state=tk.NORMAL)
+            except: pass
+        
+        self.invalidate_downstream() 
+        
+        if self.is_measuring: self.canvas.config(cursor="target")
+        elif self.is_delete_node_mode: self.canvas.config(cursor="X_cursor")
+        else: self.canvas.config(cursor="crosshair")
+
+    def _run_async(self, func, callback, *args):
+        self._lock_ui()
+        self.progress.start(15)
+
+        def worker():
+            class StdoutRedirector:
+                def __init__(self, app): self.app = app
+                def write(self, string):
+                    if string.strip(): self.app.log(string.strip())
+                def flush(self): pass
+            
+            old_stdout = sys.stdout
+            sys.stdout = StdoutRedirector(self)
+            
+            try:
+                res = func(*args)
+                err = None
+            except Exception as e:
+                res = None
+                err = e
+            finally:
+                sys.stdout = old_stdout
+                
+            self.root.after(0, self._on_async_done, callback, res, err)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_async_done(self, callback, res, err):
+        self.progress.stop()
+        self._unlock_ui()
+        if err:
+            self.log(f"ОШИБКА: {err}")
+            messagebox.showerror("Ошибка", str(err))
+        elif callback:
+            callback(res)
+
+    def log(self, message: str):
+        def append():
+            self.text_log.config(state=tk.NORMAL)
+            self.text_log.insert(tk.END, message + "\n")
+            self.text_log.see(tk.END)
+            self.text_log.config(state=tk.DISABLED)
+            self.root.update_idletasks()
+        self.root.after(0, append)
+
+    def copy_logs(self):
+        content = self.text_log.get("1.0", tk.END).strip()
+        if content: self.root.clipboard_clear(); self.root.clipboard_append(content); messagebox.showinfo("Скопировано", "Логи скопированы!")
+            
+    def clear_logs(self):
+        self.text_log.config(state=tk.NORMAL); self.text_log.delete("1.0", tk.END); self.text_log.config(state=tk.DISABLED); self.root.update()
 
     def _on_left_scroll(self, event):
         if event.num == 4 or getattr(event, 'delta', 0) > 0:
@@ -430,10 +531,71 @@ class CamApp:
             self.current_dist_factor = 1.0
             self.current_rapport = 0.0
             self.layout_mismatch = False
+
+    def do_step1(self):
+        if not self.input_filepath: return messagebox.showwarning("Внимание", "Сначала СОЗДАЙТЕ ПРОЕКТ!")
+        self._run_async(CamPipeline().step1_parse, self._on_step1_done, self.input_filepath)
+
+    def _on_step1_done(self, raw_paths):
+        if raw_paths:
+            self.raw_paths = raw_paths
+            self.selected_path = None
+            self.weld_anchor = None
+            self.layers = {"raw": self.raw_paths, "healed": [], "distorted": [], "mask": [], "ideal": [], "cnc": []}
+            self.ready_paths = []
+            self.distorted_paths = []
+            self.mask_geom = None
+            self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
+            self.reset_distortion_state()
+            self.fit_to_screen()
+            self.render_canvas()
+            self.update_distortion_stats()
+            self.invalidate_downstream()
+
+    def do_step2(self):
+        paths = self.ready_paths if self.ready_paths else self.raw_paths
+        if not paths: return messagebox.showwarning("Внимание", "Сначала выполните ШАГ 1!")
+        try: loop_area = float(self.entry_loop_area.get())
+        except: return messagebox.showerror("Ошибка", "Неверный формат чисел!")
+        
+        def task(): return CamPipeline(min_loop_area=loop_area).step2_check_errors(paths)
+        self._run_async(task, self._on_step2_done)
+
+    def _on_step2_done(self, stats):
+        if stats:
+            self.error_markers = {"red": stats.get("error_nodes", []), "orange": stats.get("intersection_nodes", []), "magenta": stats.get("duplicate_nodes", []), "yellow": stats.get("dust_nodes", [])}
+            self.render_canvas()
+
+    def do_step3(self):
+        if not self.raw_paths: return messagebox.showwarning("Внимание", "Сначала выполните ШАГ 1!")
+        try: 
+            tol = float(self.entry_tolerance.get())
+            loop_area = float(self.entry_loop_area.get())
+        except: return messagebox.showerror("Ошибка", "Неверный формат чисел!")
+        
+        def task(paths, t, a, proj_dir):
+            pipeline = CamPipeline(tolerance=t, min_loop_area=a)
+            healed = pipeline.step3_heal_and_optimize(paths)
+            if healed and proj_dir:
+                pipeline.save_source_dxf(healed, proj_dir / "02_Вылеченный_Мастер.dxf")
+            return healed
             
+        self._run_async(task, self._on_step3_done, self.ready_paths if self.ready_paths else self.raw_paths, tol, loop_area, self.current_project_dir)
+
+    def _on_step3_done(self, ready_paths):
+        if ready_paths:
+            self.ready_paths = ready_paths
+            self.selected_path = None
+            self.weld_anchor = None
+            self.layers["healed"] = self.ready_paths
+            self.render_canvas()
+            self.update_distortion_stats()
+            self.invalidate_downstream()
+
     def do_apply_distortion(self):
         if self.is_distorted:
-            return messagebox.showwarning("Внимание", "Дисторсия уже применена! Сбросьте к исходнику или загрузите новый файл, чтобы применить заново.")
+            if not messagebox.askyesno("Внимание", "Дисторсия уже применена. Пересчитать и обновить слой сжатия?"):
+                return
             
         paths = self.ready_paths if self.ready_paths else self.raw_paths
         if not paths:
@@ -448,39 +610,44 @@ class CamApp:
                 return
             
         axis = self.var_dist_axis.get()
-        new_paths = self._run_with_redirect(CamPipeline().apply_distortion, paths, self.current_dist_factor, axis)
+        base_paths = [p for p in paths if p.layer_name != "CROP_MARKS"]
+        
+        self._run_async(CamPipeline().apply_distortion, lambda res: self._on_apply_distortion_done(res, axis), base_paths, self.current_dist_factor, axis)
+
+    def _on_apply_distortion_done(self, new_paths, axis):
         if new_paths:
             self.selected_path = None
-            if self.ready_paths:
-                self.ready_paths = new_paths
-                self.layers["healed"] = new_paths
-            else:
-                self.raw_paths = new_paths
-                self.layers["raw"] = new_paths
-                
+            self.distorted_paths = new_paths
+            self.layers["distorted"] = new_paths
+            
             self.is_distorted = True
             self.applied_dist_axis = axis
-            self.btn_apply_dist.config(text=f"✅ Сжато ({axis})", bg="#2E8B57", state=tk.DISABLED)
+            self.btn_apply_dist.config(text=f"✅ Сжато ({axis})", bg="#2E8B57")
+            
+            self.show_healed.set(False)
+            self.show_distorted.set(True)
             
             self.invalidate_downstream()
             self.fit_to_screen()
             self.render_canvas()
-            self.log(f"Успех: Дисторсия ({self.current_dist_factor:.4f}) по оси {axis} применена.")
+            self.log(f"Успех: Дисторсия ({self.current_dist_factor:.4f}) по оси {axis} применена на отдельный слой.")
 
     def do_rotate_90(self):
-        paths = self.ready_paths if self.ready_paths else self.raw_paths
-        if not paths:
-            return messagebox.showwarning("Внимание", "Нет векторов для поворота! Сначала выполните ШАГ 1.")
+        def task(raw, ready, dist):
+            pipeline = CamPipeline()
+            res_raw = pipeline.rotate_geometry(raw, 90.0) if raw else []
+            res_ready = pipeline.rotate_geometry(ready, 90.0) if ready else []
+            res_dist = pipeline.rotate_geometry(dist, 90.0) if dist else []
+            return res_raw, res_ready, res_dist
             
-        new_paths = self._run_with_redirect(CamPipeline().rotate_geometry, paths, 90.0)
-        if new_paths:
-            self.selected_path = None
-            if self.ready_paths:
-                self.ready_paths = new_paths
-                self.layers["healed"] = new_paths
-            else:
-                self.raw_paths = new_paths
-                self.layers["raw"] = new_paths
+        self._run_async(task, self._on_rotate_90_done, self.raw_paths, self.ready_paths, self.distorted_paths)
+
+    def _on_rotate_90_done(self, result):
+        if result:
+            self.raw_paths, self.ready_paths, self.distorted_paths = result
+            if self.raw_paths: self.layers["raw"] = self.raw_paths
+            if self.ready_paths: self.layers["healed"] = self.ready_paths
+            if self.distorted_paths: self.layers["distorted"] = self.distorted_paths
                 
             if self.is_distorted:
                 self.applied_dist_axis = "X" if self.applied_dist_axis == "Y" else "Y"
@@ -495,10 +662,8 @@ class CamApp:
         if not paths:
             return messagebox.showwarning("Внимание", "Нет макета для добавления меток! Выполните ШАГ 1.")
             
-        try:
-            width = float(self.entry_plate_width.get())
-        except ValueError:
-            return messagebox.showerror("Ошибка", "Неверный формат ширины пластины!")
+        try: width = float(self.entry_plate_width.get())
+        except ValueError: return messagebox.showerror("Ошибка", "Неверный формат ширины пластины!")
             
         if self.current_rapport <= 0:
             return messagebox.showwarning("Внимание", "Рапорт не рассчитан! Проверьте параметры шестерни.")
@@ -506,7 +671,9 @@ class CamApp:
         paths = [p for p in paths if p.layer_name != "CROP_MARKS"]
         axis = self.applied_dist_axis if self.is_distorted else self.var_dist_axis.get()
             
-        new_paths = self._run_with_redirect(CamPipeline().add_crop_marks, paths, self.current_rapport, width, axis)
+        self._run_async(CamPipeline().add_crop_marks, self._on_add_crop_marks_done, paths, self.current_rapport, width, axis)
+
+    def _on_add_crop_marks_done(self, new_paths):
         if new_paths:
             self.selected_path = None
             if self.ready_paths:
@@ -519,7 +686,218 @@ class CamApp:
             self.invalidate_downstream()
             self.fit_to_screen()
             self.render_canvas()
-            self.log(f"Успех: Обрезные метки добавлены (Ширина: {width} мм, Рапорт: {self.current_rapport} мм, Ось: {axis}).")
+            self.log("Успех: Обрезные метки добавлены в слой вылеченных векторов.")
+
+    def export_uv_mask(self):
+        if not self.current_project_dir or not (self.ready_paths or self.raw_paths): 
+            return messagebox.showwarning("Внимание", "Сначала СОЗДАЙТЕ ПРОЕКТ и ВЫЛЕЧИТЕ деталь!")
+        try: 
+            offset = float(self.entry_offset.get())
+            mark_d = float(self.entry_mark_d.get())
+            mark_margin = float(self.entry_mark_margin.get())
+        except ValueError: return messagebox.showerror("Ошибка", "Неверный формат чисел!")
+
+        date_str = datetime.datetime.now().strftime("%d.%m.%Y")
+        project_name = self.current_project_dir.name
+        default_text = f"{project_name} | Офсет: {offset} мм | Метки: D{mark_d} мм | Дата: {date_str}"
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Настройка инфо-панели")
+        dialog.geometry("700x150")
+        dialog.transient(self.root) 
+        dialog.grab_set() 
+        dialog.resizable(False, False)
+
+        tk.Label(dialog, text="Отредактируйте текст для выворотки на инфо-панели:", font=("Arial", 11, "bold")).pack(pady=(15, 5))
+        entry_text = tk.Entry(dialog, width=80, font=("Arial", 11))
+        entry_text.insert(0, default_text)
+        entry_text.pack(pady=5, padx=20)
+
+        result = [None] 
+        def on_ok():
+            result[0] = entry_text.get()
+            dialog.destroy()
+        def on_cancel(): dialog.destroy()
+
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        tk.Button(btn_frame, text="✅ Сгенерировать PDF", width=20, bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), command=on_ok).pack(side=tk.LEFT, padx=10)
+        tk.Button(btn_frame, text="❌ Отмена", width=10, bg="#f44336", fg="white", font=("Arial", 10, "bold"), command=on_cancel).pack(side=tk.LEFT, padx=10)
+
+        self.root.wait_window(dialog) 
+        if result[0] is None:
+            self.log("Генерация УФ-Маски отменена пользователем.")
+            return 
+
+        final_badge_text = result[0]
+        mask_file = self.current_project_dir / "Травление" / "03_УФ_Маска.pdf"
+        
+        if self.is_distorted and self.distorted_paths:
+            main_paths = self.distorted_paths
+        else:
+            main_paths = [p for p in (self.ready_paths if self.ready_paths else self.raw_paths) if p.layer_name != "CROP_MARKS"]
+            
+        crop_marks = [p for p in (self.ready_paths if self.ready_paths else self.raw_paths) if p.layer_name == "CROP_MARKS"]
+        
+        paths_for_mask = main_paths + crop_marks
+        
+        if not paths_for_mask:
+            return messagebox.showwarning("Внимание", "Нет векторов для создания маски!")
+        
+        self._run_async(CamPipeline().generate_uv_mask_pdf, self._on_export_uv_mask_done, paths_for_mask, offset, mask_file, final_badge_text, mark_d, mark_margin)
+
+    def _on_export_uv_mask_done(self, result_paths):
+        if result_paths:
+            visual_paths, pure_paths, mask_geom = result_paths
+            self.layers["mask"] = visual_paths
+            self.mask_geom = mask_geom
+            self.show_mask.set(True)
+            self.btn_cnc.config(state=tk.NORMAL)
+            self.fit_to_screen()
+            self.render_canvas()
+            messagebox.showinfo("Готово", "УФ-Маска с метками и кастомной инфо-панелью успешно сохранена.")
+
+    def export_cnc(self):
+        if not self.mask_geom: return messagebox.showwarning("Внимание", "Сначала создайте УФ-Маску!\nЧПУ использует контуры маски как базовые для расчета лезвия.")
+        try: 
+            offset = float(self.entry_offset.get())
+            lead_radius = float(self.entry_lead_radius.get()) # Считываем радиус врезки
+        except ValueError: return messagebox.showerror("Ошибка", "Неверный формат чисел в настройках!")
+            
+        idx_tool = self.combo_tool.current()
+        idx_post = self.combo_post.current()
+        if idx_tool < 0 or idx_post < 0: return messagebox.showerror("Ошибка", "Выберите инструмент и постпроцессор!")
+            
+        selected_tool = self.tools_list[idx_tool]
+        selected_post = self.posts_list[idx_post]
+        ext = selected_post.extension
+        if not ext.startswith('.'): ext = '.' + ext
+        
+        initial_dir = self.current_project_dir / "ЧПУ"
+        initial_file = f"04_УП_Фрезер{ext}"
+        
+        filepath = filedialog.asksaveasfilename(
+            title="Сохранить управляющую программу",
+            initialdir=initial_dir,
+            initialfile=initial_file,
+            defaultextension=ext,
+            filetypes=[(f"G-code файлы ({ext})", f"*{ext}"), ("Текстовые файлы", "*.txt"), ("Все файлы", "*.*")]
+        )
+        
+        if not filepath:
+            self.log("Сохранение УП отменено пользователем.")
+            return
+            
+        cnc_file = Path(filepath)
+        sharpen = self.enable_sharpening.get()
+        
+        # Передаем радиус врезки в пайплайн
+        self._run_async(CamPipeline().generate_gcode, lambda res: self._on_export_cnc_done(res, cnc_file), self.mask_geom, cnc_file, selected_tool, selected_post, offset, sharpen, lead_radius)
+
+    def _on_export_cnc_done(self, generated_paths, cnc_file):
+        if generated_paths:
+            ideal_paths, cnc_paths = generated_paths
+            self.layers["ideal"] = ideal_paths
+            self.layers["cnc"] = cnc_paths
+            self.show_ideal.set(True)
+            self.show_cnc.set(True)
+            self.render_canvas()
+            messagebox.showinfo("Готово", f"УП успешно сохранена:\n{cnc_file.name}")
+
+    def do_live_edit(self):
+        paths_to_edit = self.ready_paths if self.ready_paths else self.raw_paths
+        if not paths_to_edit: return messagebox.showwarning("Внимание", "Нет векторов для редактирования! Сначала выполните ШАГ 1.")
+        
+        def task():
+            temp_dir = Path(tempfile.gettempdir())
+            safe_svg = temp_dir / f"cam_live_edit_{os.getpid()}.svg"
+            print("Экспорт геометрии во временный SVG...")
+            pipeline = CamPipeline()
+            pipeline.export_paths_to_svg(paths_to_edit, safe_svg)
+            project_root = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(os.getcwd())
+            inkscape_exe = project_root / 'inkscape_engine' / 'bin' / 'inkscape.exe' if os.name == 'nt' else Path('inkscape')
+            print("Ожидание завершения работы Inkscape...")
+            print("-> Внесите изменения, нажмите Ctrl+S и закройте Inkscape.")
+            
+            subprocess.run([str(inkscape_exe), str(safe_svg)])
+            print("Inkscape закрыт. Чтение изменений...")
+            new_paths = pipeline.step1_parse(safe_svg)
+            if safe_svg.exists():
+                try: safe_svg.unlink()
+                except: pass
+            return new_paths
+
+        self._run_async(task, self._on_live_edit_done)
+
+    def _on_live_edit_done(self, new_paths):
+        if new_paths:
+            self.selected_path = None
+            self.weld_anchor = None
+            if self.ready_paths:
+                self.ready_paths = new_paths
+                self.layers["healed"] = new_paths
+            else:
+                self.raw_paths = new_paths
+                self.layers["raw"] = new_paths
+            self.invalidate_downstream()
+            self.fit_to_screen()
+            self.render_canvas()
+            self.log("Векторы успешно обновлены из Inkscape!")
+            messagebox.showinfo("Live Edit", "Изменения успешно применены!")
+        else:
+            self.log("Внимание: Файл пуст или сохранен некорректно.")
+
+    def create_project(self):
+        filepath = filedialog.askopenfilename(title="Выберите макет", filetypes=(("Поддерживаемые макеты", "*.dxf *.svg *.pdf *.ai *.cdr *.eps"), ("Все файлы", "*.*")))
+        if not filepath: return
+        proj_root = Path("Проекты")
+        proj_root.mkdir(exist_ok=True)
+        existing = [d.name for d in proj_root.iterdir() if d.is_dir() and d.name.startswith("Проект_")]
+        nums = [int(n.split("_")[1]) for n in existing if n.split("_")[1].isdigit()]
+        proj_name = f"Проект_{max(nums) + 1 if nums else 1:03d}"
+        self.current_project_dir = proj_root / proj_name
+        self.current_project_dir.mkdir()
+        (self.current_project_dir / "Травление").mkdir()
+        (self.current_project_dir / "ЧПУ").mkdir()
+        
+        project_source_file = self.current_project_dir / f"01_Исходник{Path(filepath).suffix}"
+        shutil.copy2(filepath, project_source_file)
+        self.input_filepath = project_source_file
+        self.lbl_proj_info.config(text=f"Папка: {proj_name}\nМакет: {Path(filepath).name}", fg="black")
+        
+        self.canvas.delete("all")
+        self.raw_paths, self.ready_paths, self.distorted_paths = [], [], []
+        self.mask_geom = None
+        self.selected_path = None
+        self.weld_anchor = None
+        self.layers = {"raw": [], "healed": [], "distorted": [], "mask": [], "ideal": [], "cnc": []}
+        self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
+        
+        self.show_raw.set(True)
+        self.show_healed.set(True)
+        self.show_distorted.set(False)
+        self.show_mask.set(True)
+        self.show_ideal.set(False)
+        self.show_cnc.set(True)
+        self.show_rapids.set(True)
+        
+        self.reset_distortion_state()
+        self.update_distortion_stats()
+        self.invalidate_downstream()
+        self.log(f"\n=== ПРОЕКТ {proj_name} СОЗДАН ===")
+
+    def do_reset(self):
+        if not self.raw_paths: return
+        self.ready_paths, self.mask_geom = [], None
+        self.distorted_paths = []
+        self.selected_path = None
+        self.weld_anchor = None
+        self.layers["healed"], self.layers["distorted"], self.layers["mask"], self.layers["ideal"], self.layers["cnc"] = [], [], [], [], []
+        self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
+        self.reset_distortion_state()
+        self.render_canvas()
+        self.update_distortion_stats()
+        self.invalidate_downstream()
 
     def toggle_measure(self):
         if self.is_delete_node_mode: self.toggle_delete_node_mode()
@@ -557,6 +935,7 @@ class CamApp:
         visible = []
         if self.show_raw.get(): visible.extend(self.layers["raw"])
         if self.show_healed.get(): visible.extend(self.layers["healed"])
+        if self.show_distorted.get(): visible.extend(self.layers["distorted"])
         if self.show_mask.get(): visible.extend(self.layers["mask"])
         if self.show_ideal.get(): visible.extend(self.layers["ideal"])
         if self.show_cnc.get(): visible.extend(self.layers["cnc"])
@@ -610,7 +989,12 @@ class CamApp:
     def invalidate_downstream(self):
         self.mask_geom = None
         self.layers["mask"], self.layers["ideal"], self.layers["cnc"] = [], [], []
-        self.btn_mask.config(state=tk.DISABLED)
+        
+        if self.ready_paths or self.raw_paths:
+            self.btn_mask.config(state=tk.NORMAL)
+        else:
+            self.btn_mask.config(state=tk.DISABLED)
+            
         self.btn_cnc.config(state=tk.DISABLED)
         self.update_distortion_stats()
 
@@ -656,6 +1040,7 @@ class CamApp:
         if self.weld_anchor and self.weld_anchor[0] == self.selected_path: self.weld_anchor = None
         if self.selected_path in self.raw_paths: self.raw_paths.remove(self.selected_path)
         if self.selected_path in self.ready_paths: self.ready_paths.remove(self.selected_path)
+        if self.selected_path in self.distorted_paths: self.distorted_paths.remove(self.selected_path)
         for layer_paths in self.layers.values():
             if self.selected_path in layer_paths: layer_paths.remove(self.selected_path)
         self.selected_path = None
@@ -724,9 +1109,11 @@ class CamApp:
         else:
             pts1 = pts[:seg_i+1]
             pts2 = pts[seg_i+1:]
-            target_list = self.ready_paths if self.selected_path in self.ready_paths else self.raw_paths
+            
+            target_list = self.distorted_paths if self.selected_path in self.distorted_paths else (self.ready_paths if self.selected_path in self.ready_paths else self.raw_paths)
             layer_name = self.selected_path.layer_name
             if self.selected_path in target_list: target_list.remove(self.selected_path)
+            
             target_layer = self.layers.get("raw")
             for layer_paths in self.layers.values():
                 if self.selected_path in layer_paths:
@@ -793,6 +1180,7 @@ class CamApp:
             p1.points = merged
             if p2 in self.raw_paths: self.raw_paths.remove(p2)
             if p2 in self.ready_paths: self.ready_paths.remove(p2)
+            if p2 in self.distorted_paths: self.distorted_paths.remove(p2)
             for layer_paths in self.layers.values():
                 if p2 in layer_paths: layer_paths.remove(p2)
             self.selected_path = p1
@@ -829,6 +1217,7 @@ class CamApp:
                 if len(path.points) < 2:
                     if path in self.raw_paths: self.raw_paths.remove(path)
                     if path in self.ready_paths: self.ready_paths.remove(path)
+                    if path in self.distorted_paths: self.distorted_paths.remove(path)
                     for layer_paths in self.layers.values():
                         if path in layer_paths: layer_paths.remove(path)
                     if self.selected_path == path: self.selected_path = None
@@ -870,7 +1259,15 @@ class CamApp:
         self.last_mouse_x = event.x
         self.last_mouse_y = event.y
         self.canvas.delete("hover_tooltip")
+        self.canvas.delete("coord_tracker")
+        
         wx, wy, snapped_pt, layer_name = self.get_snapped_coords(event.x, event.y)
+        
+        z_val = snapped_pt[2] if snapped_pt and len(snapped_pt) > 2 and snapped_pt[2] is not None else 0.000
+        coord_text = f"X: {wx:.3f}   Y: {wy:.3f}   Z: {z_val:.3f}"
+        self.canvas.create_text(self.canvas.winfo_width() - 15, self.canvas_h - 15, 
+                                text=coord_text, fill="#00FFFF", font=("Courier New", 12, "bold"), 
+                                anchor=tk.SE, tags="coord_tracker")
         
         if hasattr(self, 'ruler_x'):
             self.ruler_x.delete("tracker")
@@ -898,7 +1295,10 @@ class CamApp:
             sx2 = wx * self.current_scale + self.current_tx
             sy2 = self.canvas_h - (wy * self.current_scale + self.current_ty)
             self.canvas.create_oval(sx2-4, sy2-4, sx2+4, sy2+4, outline="#00FFFF", width=2, tags="hover_tooltip")
-            text = f"Слой: {layer_name}\nX: {snapped_pt[0]:.3f}\nY: {snapped_pt[1]:.3f}"
+            
+            z_str = f"\nZ: {snapped_pt[2]:.3f}" if len(snapped_pt) > 2 and snapped_pt[2] is not None else ""
+            text = f"Слой: {layer_name}\nX: {snapped_pt[0]:.3f}\nY: {snapped_pt[1]:.3f}{z_str}"
+            
             text_id = self.canvas.create_text(event.x + 15, event.y - 15, text=text, fill="#00FFFF", font=("Arial", 10, "bold"), anchor=tk.SW, tags="hover_tooltip")
             bbox = self.canvas.bbox(text_id)
             if bbox:
@@ -923,12 +1323,14 @@ class CamApp:
                         self.selected_path.points[0] = (wx, wy, first_pt[2]) if len(first_pt) > 2 else (wx, wy)
             self.invalidate_downstream()
             self.render_canvas()
+            self.on_mouse_move(event)
             return
 
         self.current_tx += event.x - self.pan_start_x
         self.current_ty -= event.y - self.pan_start_y 
         self.pan_start_x, self.pan_start_y = event.x, event.y
         self.render_canvas()
+        self.on_mouse_move(event)
 
     def on_mousewheel(self, event):
         if event.num == 4 or getattr(event, 'delta', 0) > 0: zoom = 1.1 
@@ -938,6 +1340,7 @@ class CamApp:
         self.current_scale *= zoom
         self.current_tx, self.current_ty = event.x - wx * self.current_scale, self.canvas_h - event.y - wy * self.current_scale
         self.render_canvas()
+        self.on_mouse_move(event)
 
     def fit_to_screen(self):
         visible = self.get_visible_paths()
@@ -958,9 +1361,32 @@ class CamApp:
         self.canvas.delete("all")
         self.canvas_h = self.canvas.winfo_height()
         
+        if self.show_rapids.get() and self.layers["cnc"]:
+            curr_pos = (0.0, 0.0)
+            for path in self.layers["cnc"]:
+                if not path.points: continue
+                start_pt = path.points[0]
+                sx1 = curr_pos[0] * self.current_scale + self.current_tx
+                sy1 = self.canvas_h - (curr_pos[1] * self.current_scale + self.current_ty)
+                sx2 = start_pt[0] * self.current_scale + self.current_tx
+                sy2 = self.canvas_h - (start_pt[1] * self.current_scale + self.current_ty)
+                
+                if math.hypot(start_pt[0] - curr_pos[0], start_pt[1] - curr_pos[1]) > 0.1:
+                    self.canvas.create_line(sx1, sy1, sx2, sy2, fill="#FF8C00", width=1.5, dash=(4, 4))
+                
+                curr_pos = path.points[-1]
+                
+            sx1 = curr_pos[0] * self.current_scale + self.current_tx
+            sy1 = self.canvas_h - (curr_pos[1] * self.current_scale + self.current_ty)
+            sx2 = 0.0 * self.current_scale + self.current_tx
+            sy2 = self.canvas_h - (0.0 * self.current_scale + self.current_ty)
+            if math.hypot(0.0 - curr_pos[0], 0.0 - curr_pos[1]) > 0.1:
+                self.canvas.create_line(sx1, sy1, sx2, sy2, fill="#FF8C00", width=1.5, dash=(4, 4))
+        
         layers_to_draw = [
             (self.show_raw, self.layers["raw"], "#555555", 1.0, None),
             (self.show_healed, self.layers["healed"], "#00FFFF", 1.5, None),
+            (self.show_distorted, self.layers["distorted"], "#1E90FF", 1.5, None),
             (self.show_mask, self.layers["mask"], "#FF1493", 2.0, None),
             (self.show_ideal, self.layers["ideal"], "#FFFF00", 2.0, None), 
             (self.show_cnc, self.layers["cnc"], "#00FF00", 1.5, (5, 5))
@@ -1023,222 +1449,3 @@ class CamApp:
             self.canvas.create_text(cx, cy - 80, text=f"⚠️ ДИСТОРСИЯ ПРИМЕНЕНА ({self.applied_dist_axis})", fill="#FF4500", font=("Arial", 10, "bold"), anchor=tk.SW, tags="ucs")
 
         self._draw_rulers()
-
-    def log(self, message: str):
-        self.text_log.config(state=tk.NORMAL); self.text_log.insert(tk.END, message + "\n"); self.text_log.see(tk.END); self.text_log.config(state=tk.DISABLED); self.root.update()
-
-    def copy_logs(self):
-        content = self.text_log.get("1.0", tk.END).strip()
-        if content: self.root.clipboard_clear(); self.root.clipboard_append(content); messagebox.showinfo("Скопировано", "Логи скопированы!")
-            
-    def clear_logs(self):
-        self.text_log.config(state=tk.NORMAL); self.text_log.delete("1.0", tk.END); self.text_log.config(state=tk.DISABLED); self.root.update()
-
-    def _run_with_redirect(self, func, *args):
-        class StdoutRedirector:
-            def __init__(self, app): self.app = app
-            def write(self, string):
-                if string.strip(): self.app.log(string.strip())
-            def flush(self): pass
-        old_stdout = sys.stdout
-        sys.stdout = StdoutRedirector(self)
-        try: return func(*args)
-        except Exception as e: self.log(f"ОШИБКА: {e}"); messagebox.showerror("Ошибка", str(e))
-        finally: sys.stdout = old_stdout
-
-    def do_live_edit(self):
-        paths_to_edit = self.ready_paths if self.ready_paths else self.raw_paths
-        if not paths_to_edit: return messagebox.showwarning("Внимание", "Нет векторов для редактирования! Сначала выполните ШАГ 1.")
-        temp_dir = Path(tempfile.gettempdir())
-        safe_svg = temp_dir / f"cam_live_edit_{os.getpid()}.svg"
-        self.log("Экспорт геометрии во временный SVG...")
-        pipeline = CamPipeline()
-        pipeline.export_paths_to_svg(paths_to_edit, safe_svg)
-        project_root = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(os.getcwd())
-        inkscape_exe = project_root / 'inkscape_engine' / 'bin' / 'inkscape.exe' if os.name == 'nt' else Path('inkscape')
-        self.log("Ожидание завершения работы Inkscape...")
-        self.log("-> Внесите изменения, нажмите Ctrl+S и закройте Inkscape.")
-        self.root.update()
-        try:
-            subprocess.run([str(inkscape_exe), str(safe_svg)])
-            self.log("Inkscape закрыт. Чтение изменений...")
-            new_paths = pipeline.step1_parse(safe_svg)
-            if new_paths:
-                self.selected_path = None
-                self.weld_anchor = None
-                if self.ready_paths:
-                    self.ready_paths = new_paths
-                    self.layers["healed"] = new_paths
-                else:
-                    self.raw_paths = new_paths
-                    self.layers["raw"] = new_paths
-                self.invalidate_downstream()
-                self.fit_to_screen()
-                self.render_canvas()
-                self.log("Векторы успешно обновлены из Inkscape!")
-                messagebox.showinfo("Live Edit", "Изменения успешно применены!")
-            else: self.log("Внимание: Файл пуст или сохранен некорректно.")
-        except Exception as e:
-            self.log(f"Ошибка Live Edit: {e}")
-            messagebox.showerror("Ошибка", f"Не удалось выполнить Live Edit:\n{e}")
-        finally:
-            if safe_svg.exists():
-                try: safe_svg.unlink()
-                except: pass
-
-    def do_step1(self):
-        if not self.input_filepath: return messagebox.showwarning("Внимание", "Сначала СОЗДАЙТЕ ПРОЕКТ!")
-        self.raw_paths = self._run_with_redirect(CamPipeline().step1_parse, self.input_filepath)
-        if self.raw_paths:
-            self.selected_path = None
-            self.weld_anchor = None
-            self.layers["raw"] = self.raw_paths; self.layers["healed"], self.layers["mask"], self.layers["ideal"], self.layers["cnc"] = [], [], [], []
-            self.mask_geom = None
-            self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
-            self.reset_distortion_state()
-            self.fit_to_screen(); self.render_canvas()
-            self.update_distortion_stats()
-
-    def do_step2(self):
-        paths = self.ready_paths if self.ready_paths else self.raw_paths
-        if not paths: return messagebox.showwarning("Внимание", "Сначала выполните ШАГ 1!")
-        try: loop_area = float(self.entry_loop_area.get())
-        except: return messagebox.showerror("Ошибка", "Неверный формат чисел!")
-        stats = self._run_with_redirect(CamPipeline(min_loop_area=loop_area).step2_check_errors, paths)
-        if stats:
-            self.error_markers = {"red": stats.get("error_nodes", []), "orange": stats.get("intersection_nodes", []), "magenta": stats.get("duplicate_nodes", []), "yellow": stats.get("dust_nodes", [])}
-            self.render_canvas()
-
-    def do_step3(self):
-        if not self.raw_paths: return messagebox.showwarning("Внимание", "Сначала выполните ШАГ 1!")
-        try: tol, loop_area = float(self.entry_tolerance.get()), float(self.entry_loop_area.get())
-        except: return messagebox.showerror("Ошибка", "Неверный формат чисел!")
-        self.ready_paths = self._run_with_redirect(CamPipeline(tolerance=tol, min_loop_area=loop_area).step3_heal_and_optimize, self.ready_paths if self.ready_paths else self.raw_paths)
-        if self.ready_paths:
-            self.selected_path = None
-            self.weld_anchor = None
-            self.layers["healed"] = self.ready_paths; self.render_canvas()
-            self.btn_mask.config(state=tk.NORMAL); self.btn_cnc.config(state=tk.NORMAL)
-            self.update_distortion_stats()
-            if self.current_project_dir: self._run_with_redirect(CamPipeline().save_source_dxf, self.ready_paths, self.current_project_dir / "02_Вылеченный_Мастер.dxf")
-
-    def do_reset(self):
-        if not self.raw_paths: return
-        self.ready_paths, self.mask_geom = [], None
-        self.selected_path = None
-        self.weld_anchor = None
-        self.layers["healed"], self.layers["mask"], self.layers["ideal"], self.layers["cnc"] = [], [], [], []
-        self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
-        self.reset_distortion_state()
-        self.render_canvas(); self.btn_mask.config(state=tk.DISABLED); self.btn_cnc.config(state=tk.DISABLED)
-        self.update_distortion_stats()
-
-    def create_project(self):
-        filepath = filedialog.askopenfilename(title="Выберите макет", filetypes=(("Поддерживаемые макеты", "*.dxf *.svg *.pdf *.ai *.cdr *.eps"), ("Все файлы", "*.*")))
-        if not filepath: return
-        proj_root = Path("Проекты")
-        proj_root.mkdir(exist_ok=True)
-        existing = [d.name for d in proj_root.iterdir() if d.is_dir() and d.name.startswith("Проект_")]
-        nums = [int(n.split("_")[1]) for n in existing if n.split("_")[1].isdigit()]
-        proj_name = f"Проект_{max(nums) + 1 if nums else 1:03d}"
-        self.current_project_dir = proj_root / proj_name
-        self.current_project_dir.mkdir()
-        (self.current_project_dir / "Травление").mkdir()
-        (self.current_project_dir / "ЧПУ").mkdir()
-        
-        project_source_file = self.current_project_dir / f"01_Исходник{Path(filepath).suffix}"
-        shutil.copy2(filepath, project_source_file)
-        self.input_filepath = project_source_file
-        self.lbl_proj_info.config(text=f"Папка: {proj_name}\nМакет: {Path(filepath).name}", fg="black")
-        
-        self.canvas.delete("all")
-        self.raw_paths, self.ready_paths = [], []
-        self.mask_geom = None
-        self.selected_path = None
-        self.weld_anchor = None
-        self.layers = {"raw": [], "healed": [], "mask": [], "ideal": [], "cnc": []}
-        self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
-        self.show_raw.set(True); self.show_healed.set(True); self.show_mask.set(True); self.show_ideal.set(False); self.show_cnc.set(True)
-        self.btn_mask.config(state=tk.DISABLED); self.btn_cnc.config(state=tk.DISABLED)
-        self.reset_distortion_state()
-        self.update_distortion_stats()
-        self.log(f"\n=== ПРОЕКТ {proj_name} СОЗДАН ===")
-
-    def export_uv_mask(self):
-        if not self.current_project_dir or not self.ready_paths: return messagebox.showwarning("Внимание", "Сначала СОЗДАЙТЕ ПРОЕКТ и ВЫЛЕЧИТЕ деталь!")
-        try: 
-            offset = float(self.entry_offset.get())
-            mark_d = float(self.entry_mark_d.get())
-            mark_margin = float(self.entry_mark_margin.get())
-        except ValueError: return messagebox.showerror("Ошибка", "Неверный формат чисел!")
-
-        date_str = datetime.datetime.now().strftime("%d.%m.%Y")
-        project_name = self.current_project_dir.name
-        default_text = f"{project_name} | Офсет: {offset} мм | Метки: D{mark_d} мм | Дата: {date_str}"
-
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Настройка инфо-панели")
-        dialog.geometry("700x150")
-        dialog.transient(self.root) 
-        dialog.grab_set() 
-        dialog.resizable(False, False)
-
-        tk.Label(dialog, text="Отредактируйте текст для выворотки на инфо-панели:", font=("Arial", 11, "bold")).pack(pady=(15, 5))
-        entry_text = tk.Entry(dialog, width=80, font=("Arial", 11))
-        entry_text.insert(0, default_text)
-        entry_text.pack(pady=5, padx=20)
-
-        result = [None] 
-        def on_ok():
-            result[0] = entry_text.get()
-            dialog.destroy()
-        def on_cancel(): dialog.destroy()
-
-        btn_frame = tk.Frame(dialog)
-        btn_frame.pack(pady=10)
-        tk.Button(btn_frame, text="✅ Сгенерировать PDF", width=20, bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), command=on_ok).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="❌ Отмена", width=10, bg="#f44336", fg="white", font=("Arial", 10, "bold"), command=on_cancel).pack(side=tk.LEFT, padx=10)
-
-        self.root.wait_window(dialog) 
-        if result[0] is None:
-            self.log("Генерация УФ-Маски отменена пользователем.")
-            return 
-
-        final_badge_text = result[0]
-        mask_file = self.current_project_dir / "Травление" / "03_УФ_Маска.pdf"
-        
-        result_paths = self._run_with_redirect(CamPipeline().generate_uv_mask_pdf, self.ready_paths, offset, mask_file, final_badge_text, mark_d, mark_margin)
-        if result_paths:
-            visual_paths, pure_paths, mask_geom = result_paths
-            self.layers["mask"] = visual_paths
-            self.mask_geom = mask_geom
-            self.show_mask.set(True)
-            self.fit_to_screen()
-            self.render_canvas()
-            messagebox.showinfo("Готово", "УФ-Маска с метками и кастомной инфо-панелью успешно сохранена.")
-
-    def export_cnc(self):
-        if not self.mask_geom: return messagebox.showwarning("Внимание", "Сначала создайте УФ-Маску!\nЧПУ использует контуры маски как базовые для расчета лезвия.")
-        try: offset = float(self.entry_offset.get())
-        except ValueError: return messagebox.showerror("Ошибка", "Неверный формат офсета!")
-            
-        idx_tool = self.combo_tool.current()
-        idx_post = self.combo_post.current()
-        if idx_tool < 0 or idx_post < 0: return messagebox.showerror("Ошибка", "Выберите инструмент и постпроцессор!")
-            
-        selected_tool = self.tools_list[idx_tool]
-        selected_post = self.posts_list[idx_post]
-        ext = selected_post.extension
-        if not ext.startswith('.'): ext = '.' + ext
-        cnc_file = self.current_project_dir / "ЧПУ" / f"04_УП_Фрезер{ext}"
-        sharpen = self.enable_sharpening.get()
-        
-        generated_paths = self._run_with_redirect(CamPipeline().generate_gcode, self.mask_geom, cnc_file, selected_tool, selected_post, offset, sharpen)
-        if generated_paths:
-            ideal_paths, cnc_paths = generated_paths
-            self.layers["ideal"] = ideal_paths
-            self.layers["cnc"] = cnc_paths
-            self.show_ideal.set(True)
-            self.show_cnc.set(True)
-            self.render_canvas()
-            messagebox.showinfo("Готово", f"УП сохранена как {cnc_file.name}!")
