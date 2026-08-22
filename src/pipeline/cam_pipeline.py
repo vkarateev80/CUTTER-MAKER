@@ -36,6 +36,20 @@ class CamPipeline:
         self.optimizer = TopologicalOptimizer(simplify_tolerance=0.001)
         self.nesting = NestingOptimizer()
 
+    def multiply_paths(self, paths: list[CamPath], offsets: list[tuple[float, float]]) -> list[CamPath]:
+        print(f"[МАССИВ] Клонирование вылеченного мастер-штампа ({len(offsets)} копий)...")
+        multiplied = []
+        for dx, dy in offsets:
+            for p in paths:
+                new_path = CamPath(layer_name="ARRAY", is_closed=p.is_closed)
+                for pt in p.points:
+                    x = pt[0] + dx
+                    y = pt[1] + dy
+                    z = pt[2] if len(pt) > 2 else None
+                    new_path.add_point(round(x, 4), round(y, 4), z)
+                multiplied.append(new_path)
+        return multiplied
+
     def step1_parse(self, input_path: str | Path) -> list[CamPath]:
         input_file = Path(input_path)
         extension = input_file.suffix.lower()
@@ -310,8 +324,8 @@ class CamPipeline:
             
         return mask_visual_paths, pure_mask_paths, mask_geom
 
-    def generate_gcode(self, mask_geom, output_path: str | Path, tool_obj: Tool, post_obj: PostProcessor, mask_offset: float, enable_sharpening: bool, lead_radius: float = 0.0) -> tuple[list[CamPath], list[CamPath]]:
-        print(f"[ЧПУ] Расчет Идеального лезвия (Вход по дуге R={lead_radius}мм)...")
+    def generate_gcode(self, mask_geom, output_path: str | Path, tool_obj: Tool, post_obj: PostProcessor, mask_offset: float, enable_sharpening: bool, lead_radius: float = 0.0, milling_dir: str = "Climb") -> tuple[list[CamPath], list[CamPath], float]:
+        print(f"[ЧПУ] Расчет Идеального лезвия (Вход по дуге R={lead_radius}мм, Режим: {milling_dir})...")
         tool = VBitTool(tool_obj)
         print(f"      Инструмент: {tool_obj.name} ({tool_obj.angle_deg}°, Пятно={tool_obj.tip_diameter}мм, Z={tool_obj.depth}мм, Шаг={tool_obj.step_down}мм)")
         print(f"      Радиус смещения (R_eff): {tool.offset_radius:.4f} мм")
@@ -319,7 +333,7 @@ class CamPipeline:
         ideal_paths, cnc_paths = self.nesting.process_mask_geometry(mask_geom, mask_offset, tool.offset_radius, tool.depth, enable_sharpening)
         
         compiler = GCodeCompiler(tool=tool_obj, postprocessor=post_obj)
-        gcode_text, ordered_cnc_paths = compiler.compile(cnc_paths, lead_radius)
+        gcode_text, ordered_cnc_paths, time_min = compiler.compile(cnc_paths, lead_radius, milling_dir)
         with open(output_path, "w", encoding="utf-8") as f: f.write(gcode_text)
         
-        return ideal_paths, ordered_cnc_paths
+        return ideal_paths, ordered_cnc_paths, time_min

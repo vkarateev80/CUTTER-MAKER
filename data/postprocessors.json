@@ -2,7 +2,7 @@
     {
         "id": "ec344b5a-5d1f-467b-b996-2a12f5c11cf8",
         "name": "GRBL (Standard)",
-        "extension": ".cnc",
+        "extension": ".nc",
         "header": "; --- НАЧАЛО ПРОГРАММЫ ---\nG21\nG90\nG0 Z{safe_z}",
         "footer": "; --- КОНЕЦ ПРОГРАММЫ ---\nG0 Z{safe_z}\nG0 X0.000 Y0.000\nM30",
         "tool_on": "M3 S{rpm}",
