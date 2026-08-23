@@ -1,0 +1,23 @@
+# Среда разработки
+venv/
+__pycache__/
+.vscode/
+
+# Сборка PyInstaller
+build/
+dist/
+*.spec
+*.exe
+
+# Тяжелые движки и базы данных
+inkscape_engine/
+ghostscript_engine/
+data/
+
+# Пользовательские проекты и релизы
+Проекты/
+CUTTER_MAKER_RELEASE/
+
+# Временные файлы
+*.log
+*.tmp
