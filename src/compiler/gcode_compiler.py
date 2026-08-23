@@ -70,8 +70,11 @@ class GCodeCompiler:
             
         return ordered
 
-    def _apply_smart_lead_in_out(self, path: CamPath, radius: float) -> CamPath:
-        """Поиск безопасной точки и построение дуг строго ОТ заготовки"""
+    def _apply_smart_lead_in_out(self, path: CamPath, radius: float, forbidden_points: list[tuple[float, float]] = None) -> CamPath:
+        """Поиск безопасной точки и построение дуг строго ОТ заготовки, избегая запретных зон"""
+        if forbidden_points is None:
+            forbidden_points = []
+            
         if len(path.points) < 2 or radius <= 0.001: return path
         z_val = path.points[0][2] if len(path.points[0]) > 2 else None
         is_hole = (path.layer_name == "CNC_HOLE")
@@ -91,6 +94,7 @@ class GCodeCompiler:
             return arc
 
         if not path.is_closed:
+            # Для открытых векторов точки входа/выхода жестко фиксированы концами вектора
             p0, p1 = path.points[0], path.points[1]
             l_in = math.hypot(p1[0]-p0[0], p1[1]-p0[1])
             if l_in > 1e-4:
@@ -120,6 +124,7 @@ class GCodeCompiler:
             return new_path
             
         else:
+            # Для замкнутых векторов ищем идеальную точку на периметре
             pts = path.points.copy()
             if math.hypot(pts[0][0]-pts[-1][0], pts[0][1]-pts[-1][1]) < 1e-4: pts = pts[:-1]
             n = len(pts)
@@ -136,58 +141,86 @@ class GCodeCompiler:
             segments.sort(key=lambda x: x[0], reverse=True)
             
             best_lead_in, best_lead_out, best_new_pts = None, None, None
+            fallback_lead_in, fallback_lead_out, fallback_new_pts = None, None, None
             
             for l, i, p1, p2 in segments:
                 if l < 1e-4: continue
-                pm = ((p1[0]+p2[0])/2.0, (p1[1]+p2[1])/2.0)
-                tx, ty = (p2[0]-p1[0])/l, (p2[1]-p1[1])/l
-                nx, ny = -ty, tx 
                 
-                # Строгая проверка: нормаль смотрит внутрь полигона?
-                test_pt = Point(pm[0] + nx*0.01, pm[1] + ny*0.01)
-                points_inside = poly.contains(test_pt)
+                # Тестируем несколько точек вдоль длинного отрезка (чтобы разнести дуги)
+                test_ts = [0.5] # Сначала всегда пробуем центр
+                if l > 20: test_ts.extend([0.25, 0.75, 0.1, 0.9])
+                elif l > 10: test_ts.extend([0.2, 0.8])
                 
-                # Для отверстия (HOLE) облой ВНУТРИ. Для внешнего (EXTERIOR) облой СНАРУЖИ.
-                if is_hole:
-                    if not points_inside: nx, ny = -nx, -ny # Выгибаем внутрь дырки
-                else:
-                    if points_inside: nx, ny = -nx, -ny # Выгибаем наружу от этикетки
-                
-                cx, cy = pm[0] + nx * radius, pm[1] + ny * radius
-                cross = (-nx)*ty - (-ny)*tx
-                a_pm = math.atan2(-ny, -nx)
-                
-                if cross > 0:
-                    a_start_in, a_end_out = a_pm - math.pi/2, a_pm + math.pi/2
-                    is_ccw = True
-                else:
-                    a_start_in, a_end_out = a_pm + math.pi/2, a_pm - math.pi/2
-                    is_ccw = False
-                
-                lead_in = get_arc(cx, cy, a_start_in, a_pm, is_ccw)
-                lead_out = get_arc(cx, cy, a_pm, a_end_out, is_ccw)
-                
-                # Collision Check
-                safe = True
-                poly_ext = poly.exterior
-                for pt in lead_in[:-1] + lead_out[1:]:
-                    p = Point(pt[0], pt[1])
-                    # Задевает деталь? (Для отверстий тело снаружи полигона, для внешних - внутри)
-                    if is_hole:
-                        if not poly.contains(p): safe = False; break
-                    else:
-                        if poly.contains(p): safe = False; break
-                        
-                    if math.hypot(pt[0]-pm[0], pt[1]-pm[1]) > 0.05:
-                        if p.distance(poly_ext) < 0.01: safe = False; break
-                            
-                if safe or (best_new_pts is None): 
-                    pm_3d = (pm[0], pm[1], z_val) if z_val is not None else pm
-                    best_new_pts = [pm_3d] + pts[i+1:] + pts[:i+1] + [pm_3d]
-                    best_lead_in = lead_in
-                    best_lead_out = lead_out
-                    if safe: break 
+                for t_val in test_ts:
+                    pm = (p1[0] + t_val*(p2[0]-p1[0]), p1[1] + t_val*(p2[1]-p1[1]))
+                    tx, ty = (p2[0]-p1[0])/l, (p2[1]-p1[1])/l
+                    nx, ny = -ty, tx 
                     
+                    # Строгая проверка: нормаль смотрит внутрь полигона?
+                    test_pt = Point(pm[0] + nx*0.01, pm[1] + ny*0.01)
+                    points_inside = poly.contains(test_pt)
+                    
+                    # Для отверстия облой ВНУТРИ. Для внешнего контура облой СНАРУЖИ.
+                    if is_hole:
+                        if not points_inside: nx, ny = -nx, -ny
+                    else:
+                        if points_inside: nx, ny = -nx, -ny
+                    
+                    cx, cy = pm[0] + nx * radius, pm[1] + ny * radius
+                    cross = (-nx)*ty - (-ny)*tx
+                    a_pm = math.atan2(-ny, -nx)
+                    
+                    if cross > 0:
+                        a_start_in, a_end_out = a_pm - math.pi/2, a_pm + math.pi/2
+                        is_ccw = True
+                    else:
+                        a_start_in, a_end_out = a_pm + math.pi/2, a_pm - math.pi/2
+                        is_ccw = False
+                    
+                    lead_in = get_arc(cx, cy, a_start_in, a_pm, is_ccw)
+                    lead_out = get_arc(cx, cy, a_pm, a_end_out, is_ccw)
+                    
+                    # Collision Check (Проверка на зарезы)
+                    safe = True
+                    poly_ext = poly.exterior
+                    for pt in lead_in[:-1] + lead_out[1:]:
+                        p = Point(pt[0], pt[1])
+                        if is_hole:
+                            if not poly.contains(p): safe = False; break
+                        else:
+                            if poly.contains(p): safe = False; break
+                            
+                        if math.hypot(pt[0]-pm[0], pt[1]-pm[1]) > 0.05:
+                            if p.distance(poly_ext) < 0.01: safe = False; break
+                                
+                    if safe:
+                        pm_3d = (pm[0], pm[1], z_val) if z_val is not None else pm
+                        # Перестраиваем контур, начиная с новой точки pm
+                        new_pts_candidate = [pm_3d] + [pts[(i+1+k)%n] for k in range(n)] + [pm_3d]
+                        
+                        # ПРОВЕРКА НА 10 мм от других дуг!
+                        too_close = any(math.hypot(pm[0]-fp[0], pm[1]-fp[1]) < 10.0 for fp in forbidden_points)
+                        
+                        if not too_close:
+                            # Идеальная точка найдена
+                            best_new_pts = new_pts_candidate
+                            best_lead_in = lead_in
+                            best_lead_out = lead_out
+                            break
+                        elif fallback_new_pts is None:
+                            # Сохраняем как запасной вариант, если идеального нет
+                            fallback_new_pts = new_pts_candidate
+                            fallback_lead_in = lead_in
+                            fallback_lead_out = lead_out
+                            
+                if best_new_pts: break 
+                
+            # Если идеальная точка не найдена, берем первый безопасный резерв
+            if not best_new_pts and fallback_new_pts:
+                best_new_pts = fallback_new_pts
+                best_lead_in = fallback_lead_in
+                best_lead_out = fallback_lead_out
+                
             if best_new_pts:
                 new_path = CamPath(layer_name=path.layer_name, is_closed=False)
                 new_path.points = best_lead_in[:-1] + best_new_pts + best_lead_out[1:]
@@ -213,16 +246,33 @@ class GCodeCompiler:
         regular_paths = [p for p in paths if p.layer_name != "SHARPEN"]
         sharpen_paths = [p for p in paths if p.layer_name == "SHARPEN"]
 
-        # 1. Применяем ориентацию (Попутное/Встречное) ДО дуг!
+        # 1. Применяем ориентацию ДО дуг!
         for p in regular_paths:
             self._fix_orientation(p, milling_dir)
 
         # 2. Сортируем
         regular_paths = self._optimize_path_order(regular_paths, start_pos=(0.0, 0.0))
         
-        # 3. Строим дуги
+        # 3. Строим умные дуги с учетом пространственной сетки (избегая кластеризации)
         if lead_radius > 0:
-            regular_paths = [self._apply_smart_lead_in_out(p, lead_radius) for p in regular_paths]
+            forbidden_points = []
+            
+            # Сначала фиксируем все концы открытых контуров (они жестко заданы)
+            for p in regular_paths:
+                if not p.is_closed and len(p.points) >= 2:
+                    forbidden_points.append((p.points[0][0], p.points[0][1]))
+                    forbidden_points.append((p.points[-1][0], p.points[-1][1]))
+            
+            processed_paths = []
+            for p in regular_paths:
+                new_p = self._apply_smart_lead_in_out(p, lead_radius, forbidden_points)
+                if len(new_p.points) >= 2:
+                    # Добавляем новую точку врезания в запретную зону для следующих векторов
+                    forbidden_points.append((new_p.points[0][0], new_p.points[0][1]))
+                    forbidden_points.append((new_p.points[-1][0], new_p.points[-1][1]))
+                processed_paths.append(new_p)
+                
+            regular_paths = processed_paths
         
         last_pos = (0.0, 0.0)
         if regular_paths and regular_paths[-1].points: last_pos = regular_paths[-1].points[-1]

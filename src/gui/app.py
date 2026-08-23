@@ -9,13 +9,17 @@ import tempfile
 import subprocess
 import threading
 import math
+import json
+from shapely import wkt
 
 from src.pipeline.cam_pipeline import CamPipeline
+from src.pipeline.report_generator import ReportGenerator
 from src.db.db_manager import DatabaseManager
 from src.optimizer.distortion import DistortionCalculator, LayoutAnalyzer
 from src.optimizer.pattern_recognition import PatternRecognizer
 from src.gui.ui_builder import UIBuilder
 from src.gui.canvas_manager import CanvasManager
+from src.parser.geometry import CamPath
 
 class CamApp:
     def __init__(self, root: tk.Tk):
@@ -34,8 +38,8 @@ class CamApp:
         
         # --- УМНЫЙ МАССИВ (Мастер-Штамп) ---
         self.is_array_layout = False
-        self.array_offsets = []      # Смещения (dx, dy) для клонирования
-        self.master_raw_paths = []   # Изолированные векторы одной этикетки
+        self.array_offsets = []      
+        self.master_raw_paths = []   
         
         self.layers = {"raw": [], "healed": [], "array": [], "distorted": [], "mask": [], "ideal": [], "cnc": []}
         self.error_markers = {"red": [], "orange": [], "magenta": [], "yellow": []}
@@ -46,6 +50,7 @@ class CamApp:
         self.current_dist_factor = 1.0
         self.layout_mismatch = False
         self.layout_len_val = 0.0
+        self.last_milling_time_min = 0.0
         
         self.db = DatabaseManager()
         self.tools_list = []
@@ -56,7 +61,6 @@ class CamApp:
         self.canvas_manager = CanvasManager(self.ui.frame_canvas, self)
         self.canvas_manager.bind_keys(self.root)
         
-        # Маппинг переменных UI для удобного доступа
         self.show_raw = self.ui.show_raw
         self.show_healed = self.ui.show_healed
         self.show_array = self.ui.show_array
@@ -70,7 +74,154 @@ class CamApp:
         self.refresh_comboboxes()
         self.update_distortion_stats()
 
-    # --- UI ХЕЛПЕРЫ И МЕНЕДЖЕРЫ ---
+    def save_project(self):
+        if not self.current_project_dir:
+            messagebox.showwarning("Внимание", "Нет активного проекта для сохранения.")
+            return
+        
+        state_file = self.current_project_dir / "project_state.json"
+        
+        data = {
+            "input_filepath": str(self.input_filepath) if self.input_filepath else None,
+            "last_milling_time_min": self.last_milling_time_min,
+            "ui": {
+                "tolerance": self.ui.entry_tolerance.get(),
+                "loop_area": self.ui.entry_loop_area.get(),
+                "crop_margin": self.ui.entry_crop_margin.get(),
+                "z": self.ui.var_z.get(),
+                "cp": self.ui.var_cp.get(),
+                "tp": self.ui.var_tp.get(),
+                "tb": self.ui.var_tb.get(),
+                "undercut": self.ui.var_undercut.get(),
+                "dist_axis": self.ui.var_dist_axis.get(),
+                "offset": self.ui.entry_offset.get(),
+                "mark_d": self.ui.entry_mark_d.get(),
+                "mark_margin": self.ui.entry_mark_margin.get(),
+                "lead_radius": self.ui.entry_lead_radius.get(),
+                "milling_dir": self.ui.var_milling_dir.get(),
+                "enable_sharpening": self.ui.enable_sharpening.get()
+            },
+            "flags": {
+                "is_array_layout": self.is_array_layout,
+                "array_offsets": self.array_offsets,
+                "is_distorted": self.is_distorted,
+                "applied_dist_axis": self.applied_dist_axis
+            },
+            "paths": {
+                "raw_paths": [p.to_dict() for p in self.raw_paths],
+                "ready_paths": [p.to_dict() for p in self.ready_paths],
+                "distorted_paths": [p.to_dict() for p in self.distorted_paths],
+                "master_raw_paths": [p.to_dict() for p in self.master_raw_paths],
+            },
+            "layers": {
+                "raw": [p.to_dict() for p in self.layers.get("raw", [])],
+                "healed": [p.to_dict() for p in self.layers.get("healed", [])],
+                "array": [p.to_dict() for p in self.layers.get("array", [])],
+                "distorted": [p.to_dict() for p in self.layers.get("distorted", [])],
+                "mask": [p.to_dict() for p in self.layers.get("mask", [])],
+                "ideal": [p.to_dict() for p in self.layers.get("ideal", [])],
+                "cnc": [p.to_dict() for p in self.layers.get("cnc", [])]
+            },
+            "mask_geom_wkt": self.mask_geom.wkt if self.mask_geom else None
+        }
+        
+        try:
+            with open(state_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+            self.log("Проект успешно сохранен!")
+            messagebox.showinfo("Успех", "Проект успешно сохранен!")
+        except Exception as e:
+            messagebox.showerror("Ошибка сохранения", str(e))
+
+    def load_project(self):
+        filepath = filedialog.askopenfilename(title="Выберите файл проекта", filetypes=[("JSON Файлы проекта", "project_state.json")])
+        if not filepath:
+            return
+            
+        state_file = Path(filepath)
+        self.current_project_dir = state_file.parent
+        
+        try:
+            with open(state_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            self.input_filepath = Path(data["input_filepath"]) if data.get("input_filepath") else None
+            self.last_milling_time_min = data.get("last_milling_time_min", 0.0)
+            self.ui.lbl_proj_info.config(text=f"Папка: {self.current_project_dir.name}\nМакет загружен из сохранения", fg="black")
+            
+            ui_data = data.get("ui", {})
+            def set_entry(entry, val):
+                entry.delete(0, tk.END)
+                entry.insert(0, str(val))
+                
+            set_entry(self.ui.entry_tolerance, ui_data.get("tolerance", "2.0"))
+            set_entry(self.ui.entry_loop_area, ui_data.get("loop_area", "1.0"))
+            set_entry(self.ui.entry_crop_margin, ui_data.get("crop_margin", "10.0"))
+            self.ui.var_z.set(ui_data.get("z", "96"))
+            self.ui.var_cp.set(ui_data.get("cp", "3.175"))
+            self.ui.var_tp.set(ui_data.get("tp", "0.44"))
+            self.ui.var_tb.set(ui_data.get("tb", "0.24"))
+            self.ui.var_undercut.set(ui_data.get("undercut", "0.48"))
+            self.ui.var_dist_axis.set(ui_data.get("dist_axis", "Y"))
+            set_entry(self.ui.entry_offset, ui_data.get("offset", "0.2"))
+            set_entry(self.ui.entry_mark_d, ui_data.get("mark_d", "4.0"))
+            set_entry(self.ui.entry_mark_margin, ui_data.get("mark_margin", "10.0"))
+            set_entry(self.ui.entry_lead_radius, ui_data.get("lead_radius", "1.5"))
+            self.ui.var_milling_dir.set(ui_data.get("milling_dir", "Climb (Попутное)"))
+            self.ui.enable_sharpening.set(ui_data.get("enable_sharpening", True))
+            
+            flags = data.get("flags", {})
+            self.is_array_layout = flags.get("is_array_layout", False)
+            self.array_offsets = [tuple(o) for o in flags.get("array_offsets", [])]
+            self.is_distorted = flags.get("is_distorted", False)
+            self.applied_dist_axis = flags.get("applied_dist_axis", "")
+            
+            paths_data = data.get("paths", {})
+            self.raw_paths = [CamPath.from_dict(p) for p in paths_data.get("raw_paths", [])]
+            self.ready_paths = [CamPath.from_dict(p) for p in paths_data.get("ready_paths", [])]
+            self.distorted_paths = [CamPath.from_dict(p) for p in paths_data.get("distorted_paths", [])]
+            self.master_raw_paths = [CamPath.from_dict(p) for p in paths_data.get("master_raw_paths", [])]
+            
+            layers_data = data.get("layers", {})
+            self.layers = {
+                "raw": [CamPath.from_dict(p) for p in layers_data.get("raw", [])],
+                "healed": [CamPath.from_dict(p) for p in layers_data.get("healed", [])],
+                "array": [CamPath.from_dict(p) for p in layers_data.get("array", [])],
+                "distorted": [CamPath.from_dict(p) for p in layers_data.get("distorted", [])],
+                "mask": [CamPath.from_dict(p) for p in layers_data.get("mask", [])],
+                "ideal": [CamPath.from_dict(p) for p in layers_data.get("ideal", [])],
+                "cnc": [CamPath.from_dict(p) for p in layers_data.get("cnc", [])]
+            }
+            
+            mask_wkt = data.get("mask_geom_wkt")
+            if mask_wkt: self.mask_geom = wkt.loads(mask_wkt)
+            else: self.mask_geom = None
+                
+            self.ui.btn_save_proj.config(state=tk.NORMAL)
+            if self.ready_paths or self.raw_paths: self.ui.btn_mask.config(state=tk.NORMAL)
+            if self.mask_geom: self.ui.btn_cnc.config(state=tk.NORMAL)
+            if self.last_milling_time_min > 0: self.ui.btn_report.config(state=tk.NORMAL)
+            
+            self.update_distortion_stats()
+            
+            msg = (f"Массив: Загружен из сохранения\nВсего смещений: {len(self.array_offsets)}") if self.is_array_layout else "Массив: Не найден"
+            self.ui.lbl_array_info.config(text=msg, fg="#008800" if self.is_array_layout else "#555555")
+            
+            if self.is_distorted: self.ui.btn_apply_dist.config(text=f"✅ Сжато ({self.applied_dist_axis})", bg="#2E8B57")
+            else: self.ui.btn_apply_dist.config(text="Сжать", bg="#4169E1")
+
+            self.canvas_manager.selected_path = None
+            self.canvas_manager.weld_anchor = None
+            self.canvas_manager.fit_to_screen()
+            self.canvas_manager.render_canvas()
+            
+            self.log(f"=== ПРОЕКТ {self.current_project_dir.name} УСПЕШНО ЗАГРУЖЕН ===")
+            messagebox.showinfo("Успех", "Проект успешно загружен!")
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.log(f"Ошибка загрузки проекта: {e}")
+
     def trigger_render(self):
         self.canvas_manager.render_canvas()
 
@@ -141,9 +292,10 @@ class CamApp:
         if self.ready_paths or self.raw_paths: self.ui.btn_mask.config(state=tk.NORMAL)
         else: self.ui.btn_mask.config(state=tk.DISABLED)
         self.ui.btn_cnc.config(state=tk.DISABLED)
+        self.last_milling_time_min = 0.0
+        self.ui.btn_report.config(state=tk.DISABLED)
         self.update_distortion_stats()
 
-    # --- АСИНХРОННОСТЬ И ЛОГИРОВАНИЕ ---
     def _run_async(self, func, callback, *args):
         self.ui.lock_ui()
         self.canvas_manager.canvas.config(cursor="watch")
@@ -206,7 +358,6 @@ class CamApp:
             self.root.clipboard_append(content)
             messagebox.showinfo("Скопировано", "Логи скопированы!")
 
-    # --- БИЗНЕС-ЛОГИКА (МЕТОДЫ ПАЙПЛАЙНА) ---
     def create_project(self):
         filepath = filedialog.askopenfilename(title="Выберите макет", filetypes=(("Поддерживаемые макеты", "*.dxf *.svg *.pdf *.ai *.cdr *.eps"), ("Все файлы", "*.*")))
         if not filepath: return
@@ -250,6 +401,8 @@ class CamApp:
         self.update_distortion_stats()
         self.ui.lbl_array_info.config(text="Массив: Не анализировался", fg="#555555")
         self.invalidate_downstream()
+        
+        self.ui.btn_save_proj.config(state=tk.NORMAL)
         self.log(f"\n=== ПРОЕКТ {proj_name} СОЗДАН ===")
 
     def do_reset(self):
@@ -313,7 +466,6 @@ class CamApp:
             self.current_rapport = 0.0
             self.layout_mismatch = False
 
-    # --- ШАГ 1: Извлечение и АВТО-АНАЛИЗ ---
     def do_step1(self):
         if not self.input_filepath: return messagebox.showwarning("Внимание", "Сначала СОЗДАЙТЕ ПРОЕКТ!")
         self._run_async(CamPipeline().step1_parse, self._on_step1_done, self.input_filepath)
@@ -340,11 +492,9 @@ class CamApp:
             self.log("Авто-анализ макета на наличие массива...")
             self._run_async(PatternRecognizer(tolerance=0.5).analyze, self._on_analyze_array_done, self.raw_paths)
 
-    # --- АНАЛИЗ МАССИВА ---
     def do_analyze_array(self):
         paths = self.raw_paths
-        if not paths:
-            return messagebox.showwarning("Внимание", "Нет векторов для анализа! Сначала выполните ШАГ 1.")
+        if not paths: return messagebox.showwarning("Внимание", "Нет векторов для анализа! Сначала выполните ШАГ 1.")
         self.log("Запуск анализа массивов и межэтикеточных зазоров...")
         self._run_async(PatternRecognizer(tolerance=0.5).analyze, self._on_analyze_array_done, paths)
 
@@ -371,7 +521,6 @@ class CamApp:
         self.update_distortion_stats()
         self.invalidate_downstream()
 
-    # --- ГЕНЕРАТОР МАССИВОВ (Step & Repeat) ---
     def open_array_generator(self):
         paths = self.master_raw_paths if self.master_raw_paths else self.raw_paths
         if not paths:
@@ -417,7 +566,6 @@ class CamApp:
         ent_gap_y.insert(0, "3.0")
         ent_gap_y.grid(row=5, column=1, sticky=tk.W, pady=5)
 
-        # --- АВТОРАСЧЕТ ПО Y (БЕСШОВНЫЙ СТЫК) ---
         def auto_calc_y():
             try:
                 min_gap = 3.0
@@ -427,7 +575,6 @@ class CamApp:
                     return
                 
                 max_rows = int(rapport // (label_h + min_gap))
-                
                 if max_rows < 1:
                     messagebox.showerror("Ошибка", f"Этикетка ({label_h:.2f} мм) слишком большая для рапорта {rapport:.2f} мм!")
                     return
@@ -437,12 +584,9 @@ class CamApp:
                 
                 ent_rows.delete(0, tk.END)
                 ent_rows.insert(0, str(max_rows))
-                
                 ent_gap_y.delete(0, tk.END)
                 ent_gap_y.insert(0, f"{actual_gap:.3f}")
-                
-            except Exception as e:
-                messagebox.showerror("Ошибка", str(e))
+            except Exception as e: messagebox.showerror("Ошибка", str(e))
 
         btn_auto = tk.Button(frame, text="✨ Авто-подбор Y (под шестерню)", bg="#E6E6FA", font=("Arial", 8, "bold"), command=auto_calc_y)
         btn_auto.grid(row=4, column=2, rowspan=2, padx=10, sticky=tk.NS)
@@ -479,7 +623,6 @@ class CamApp:
             self.ui.lbl_array_info.config(text=msg, fg="#FFA500")
             
             dialog.destroy()
-            
             self.log("Генерация сетки массива...")
             self._run_async(CamPipeline().multiply_paths, self._on_generate_array_done, self.master_raw_paths, self.array_offsets)
 
@@ -490,7 +633,6 @@ class CamApp:
         if preview_paths:
             self.raw_paths = preview_paths
             self.layers["raw"] = preview_paths
-            
             self.ready_paths = []
             self.layers["healed"] = []
             self.layers["array"] = []
@@ -506,13 +648,11 @@ class CamApp:
             self.update_distortion_stats()
             self.log("Успех: Массив сгенерирован. Нажмите ШАГ 3 для умного лечения.")
 
-    # --- ШАГ 2: Проверка ---
     def do_step2(self):
         paths = self.master_raw_paths if self.master_raw_paths else self.raw_paths
         if not paths: return messagebox.showwarning("Внимание", "Сначала выполните ШАГ 1!")
         try: loop_area = float(self.ui.entry_loop_area.get())
         except: return messagebox.showerror("Ошибка", "Неверный формат чисел!")
-        
         def task(): return CamPipeline(min_loop_area=loop_area).step2_check_errors(paths)
         self._run_async(task, self._on_step2_done)
 
@@ -521,7 +661,6 @@ class CamApp:
             self.error_markers = {"red": stats.get("error_nodes", []), "orange": stats.get("intersection_nodes", []), "magenta": stats.get("duplicate_nodes", []), "yellow": stats.get("dust_nodes", [])}
             self.canvas_manager.render_canvas()
 
-    # --- ШАГ 3: УМНОЕ ЛЕЧЕНИЕ ---
     def do_step3(self):
         if not self.raw_paths: return messagebox.showwarning("Внимание", "Сначала выполните ШАГ 1!")
         try: 
@@ -561,7 +700,6 @@ class CamApp:
             self.update_distortion_stats()
             self.invalidate_downstream()
 
-    # --- ОСТАЛЬНЫЕ МЕТОДЫ ---
     def do_apply_distortion(self):
         if self.is_distorted:
             if not messagebox.askyesno("Внимание", "Дисторсия уже применена. Пересчитать и обновить слой сжатия?"): return
@@ -644,10 +782,8 @@ class CamApp:
         all_y = [pt[1] for p in paths for pt in p.points]
         if not all_x or not all_y: return messagebox.showwarning("Внимание", "Векторы не содержат точек!")
         
-        if axis.upper() == 'Y':
-            actual_width = max(all_x) - min(all_x)
-        else:
-            actual_width = max(all_y) - min(all_y)
+        if axis.upper() == 'Y': actual_width = max(all_x) - min(all_x)
+        else: actual_width = max(all_y) - min(all_y)
             
         total_width = actual_width + (2.0 * margin)
         self.log(f"Авто-расчет меток: Габарит {actual_width:.2f}мм + Отступы {margin*2}мм = Ширина {total_width:.2f}мм")
@@ -766,7 +902,6 @@ class CamApp:
         cnc_file = Path(filepath)
         sharpen = self.ui.enable_sharpening.get()
         
-        # Извлекаем направление фрезеровки (Climb или Conventional)
         milling_dir_raw = self.ui.var_milling_dir.get()
         milling_dir = "Conventional" if "Conventional" in milling_dir_raw else "Climb"
         
@@ -781,19 +916,54 @@ class CamApp:
             self.ui.show_cnc.set(True)
             self.canvas_manager.render_canvas()
             
+            self.last_milling_time_min = time_min
+            self.ui.btn_report.config(state=tk.NORMAL)
+            
             hours = int(time_min // 60)
             minutes = int(time_min % 60)
             seconds = int((time_min * 60) % 60)
             
-            if hours > 0:
-                time_str = f"{hours} ч {minutes} мин"
-            else:
-                time_str = f"{minutes} мин {seconds} сек"
+            if hours > 0: time_str = f"{hours} ч {minutes} мин"
+            else: time_str = f"{minutes} мин {seconds} сек"
                 
             self.log(f"Расчетное время фрезеровки: {time_str}")
-            
             msg = f"УП успешно сохранена:\n{cnc_file.name}\n\n⏱ Примерное время фрезеровки: {time_str}"
             messagebox.showinfo("Готово", msg)
+
+    def generate_report(self):
+        if not self.current_project_dir or self.last_milling_time_min <= 0:
+            return messagebox.showwarning("Внимание", "Сначала сгенерируйте УП (ЧПУ)!")
+
+        idx_tool = self.ui.combo_tool.current()
+        selected_tool = self.tools_list[idx_tool]
+
+        stats = {
+            "is_distorted": self.is_distorted,
+            "dist_axis": self.applied_dist_axis,
+            "k_dist": round(self.current_dist_factor * 100, 4),
+            "rapport": self.current_rapport,
+            "z": self.ui.var_z.get(),
+            "cp": self.ui.var_cp.get(),
+            "tool_name": selected_tool.name,
+            "tool_angle": selected_tool.angle_deg,
+            "tool_tip": selected_tool.tip_diameter,
+            "tool_depth": selected_tool.depth,
+            "tool_rpm": selected_tool.spindle_speed,
+            "tool_feed": selected_tool.feedrate,
+            "milling_dir": self.ui.var_milling_dir.get(),
+            "offset": self.ui.entry_offset.get(),
+            "time_min": self.last_milling_time_min
+        }
+
+        paths_to_draw = self.distorted_paths if self.is_distorted and self.distorted_paths else (self.ready_paths if self.ready_paths else self.raw_paths)
+        
+        output_pdf = self.current_project_dir / "05_Техкарта.pdf"
+
+        self._run_async(ReportGenerator.generate, lambda res: self._on_generate_report_done(output_pdf), self.current_project_dir.name, stats, paths_to_draw, output_pdf)
+
+    def _on_generate_report_done(self, output_pdf):
+        self.log(f"Техкарта успешно сохранена: {output_pdf.name}")
+        messagebox.showinfo("Готово", f"Техкарта успешно сгенерирована!\nФайл: {output_pdf.name}")
 
     def do_live_edit(self):
         paths_to_edit = self.ready_paths if self.ready_paths else self.raw_paths

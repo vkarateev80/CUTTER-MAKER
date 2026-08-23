@@ -52,9 +52,18 @@ class UIBuilder:
 
         frame_proj = tk.LabelFrame(self.frame_left, text="1. Управление Проектом", padx=10, pady=10)
         frame_proj.pack(fill=tk.X, pady=5)
-        self.btn_create_proj = tk.Button(frame_proj, text="📁 СОЗДАТЬ ПРОЕКТ И ВЫБРАТЬ МАКЕТ", bg="#FFD700", font=("Arial", 10, "bold"), command=self.app.create_project)
+        
+        self.btn_create_proj = tk.Button(frame_proj, text="📁 НОВЫЙ ПРОЕКТ (ИЗ МАКЕТА)", bg="#FFD700", font=("Arial", 9, "bold"), command=self.app.create_project)
         self.btn_create_proj.pack(fill=tk.X, pady=(0, 5))
-        self.lbl_proj_info = tk.Label(frame_proj, text="Проект не создан", fg="gray", justify=tk.LEFT, wraplength=400)
+        
+        frame_io = tk.Frame(frame_proj)
+        frame_io.pack(fill=tk.X, pady=(0, 5))
+        self.btn_load_proj = tk.Button(frame_io, text="📂 ЗАГРУЗИТЬ", bg="#e0e0e0", font=("Arial", 8, "bold"), command=self.app.load_project)
+        self.btn_load_proj.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        self.btn_save_proj = tk.Button(frame_io, text="💾 СОХРАНИТЬ", bg="#87CEEB", font=("Arial", 8, "bold"), command=self.app.save_project, state=tk.DISABLED)
+        self.btn_save_proj.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+
+        self.lbl_proj_info = tk.Label(frame_proj, text="Проект не загружен", fg="gray", justify=tk.LEFT, wraplength=400)
         self.lbl_proj_info.pack(anchor=tk.W)
 
         frame_prep = tk.LabelFrame(self.frame_left, text="2. Анализ и Лечение", padx=10, pady=10)
@@ -200,13 +209,15 @@ class UIBuilder:
         self.entry_lead_radius.insert(0, "1.5")
         self.entry_lead_radius.grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
 
-        # --- НОВЫЙ ВЫБОР НАПРАВЛЕНИЯ РЕЗАНИЯ ---
         tk.Label(frame_cnc_tools, text="Направление реза:", bg="#f9f9f9", font=("Arial", 9)).grid(row=4, column=0, sticky=tk.W, pady=2)
         self.combo_milling_dir = ttk.Combobox(frame_cnc_tools, textvariable=self.var_milling_dir, state="readonly", width=18, values=["Climb (Попутное)", "Conventional (Встречное)"])
         self.combo_milling_dir.grid(row=4, column=1, padx=5, pady=2)
 
         self.btn_cnc = tk.Button(frame_export, text="⚙️ Сгенерировать УП", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.app.export_cnc)
         self.btn_cnc.pack(fill=tk.X, pady=2)
+        
+        self.btn_report = tk.Button(frame_export, text="📄 Создать Техкарту (.PDF)", bg="#20B2AA", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.app.generate_report)
+        self.btn_report.pack(fill=tk.X, pady=(5, 2))
 
         frame_log = tk.LabelFrame(self.frame_left, text="Лог работы", padx=10, pady=5)
         frame_log.pack(fill=tk.BOTH, expand=True)
@@ -261,7 +272,8 @@ class UIBuilder:
         buttons = [self.btn_step1, self.btn_step2, self.btn_step3, self.btn_crop_marks, self.btn_reset, 
                    self.btn_analyze_array, self.btn_generate_array, self.btn_apply_dist, self.btn_rotate, 
                    self.btn_live_edit, self.btn_mask, self.btn_cnc, self.btn_create_proj, self.btn_measure, 
-                   self.btn_delete_path, self.btn_delete_node, self.btn_clear_log, self.btn_copy_log]
+                   self.btn_delete_path, self.btn_delete_node, self.btn_clear_log, self.btn_copy_log,
+                   self.btn_load_proj, self.btn_save_proj, self.btn_report]
         for btn in buttons:
             try: btn.config(state=tk.DISABLED)
             except: pass
@@ -272,8 +284,10 @@ class UIBuilder:
         buttons = [self.btn_step1, self.btn_step2, self.btn_step3, self.btn_crop_marks, self.btn_reset, 
                    self.btn_analyze_array, self.btn_generate_array, self.btn_apply_dist, self.btn_rotate, 
                    self.btn_live_edit, self.btn_create_proj, self.btn_measure, self.btn_delete_path, 
-                   self.btn_delete_node, self.btn_clear_log, self.btn_copy_log]
+                   self.btn_delete_node, self.btn_clear_log, self.btn_copy_log, self.btn_load_proj, self.btn_save_proj]
         for btn in buttons:
             try: btn.config(state=tk.NORMAL)
             except: pass
         self.combo_milling_dir.config(state="readonly")
+        if not self.app.current_project_dir: self.btn_save_proj.config(state=tk.DISABLED)
+        if self.app.last_milling_time_min > 0: self.btn_report.config(state=tk.NORMAL)

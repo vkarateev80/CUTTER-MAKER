@@ -1,0 +1,42 @@
+{
+    "input_filepath": "Проекты\\Проект_103\\01_Исходник.ai",
+    "ui": {
+        "tolerance": "2.0",
+        "loop_area": "1.0",
+        "crop_margin": "10.0",
+        "z": "96",
+        "cp": "3.175",
+        "tp": "0.44",
+        "tb": "0.24",
+        "undercut": "0.48",
+        "dist_axis": "Y",
+        "offset": "0.2",
+        "mark_d": "4.0",
+        "mark_margin": "10.0",
+        "lead_radius": "1.5",
+        "milling_dir": "Climb (Попутное)",
+        "enable_sharpening": true
+    },
+    "flags": {
+        "is_array_layout": false,
+        "array_offsets": [],
+        "is_distorted": false,
+        "applied_dist_axis": ""
+    },
+    "paths": {
+        "raw_paths": [],
+        "ready_paths": [],
+        "distorted_paths": [],
+        "master_raw_paths": []
+    },
+    "layers": {
+        "raw": [],
+        "healed": [],
+        "array": [],
+        "distorted": [],
+        "mask": [],
+        "ideal": [],
+        "cnc": []
+    },
+    "mask_geom_wkt": null
+}
