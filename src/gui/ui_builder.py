@@ -26,7 +26,7 @@ class UIBuilder:
         self.var_dist_axis = tk.StringVar(value="Y")
 
         for v in (self.var_z, self.var_cp, self.var_undercut, self.var_tp, self.var_tb, self.var_dist_axis):
-            v.trace_add("write", self.app.update_distortion_stats)
+            v.trace_add("write", self.app.controller.update_distortion_stats)
 
         self._build()
         self._bind_mouse_scroll(self.frame_left_container)
@@ -53,14 +53,14 @@ class UIBuilder:
         frame_proj = tk.LabelFrame(self.frame_left, text="1. Управление Проектом", padx=10, pady=10)
         frame_proj.pack(fill=tk.X, pady=5)
         
-        self.btn_create_proj = tk.Button(frame_proj, text="📁 НОВЫЙ ПРОЕКТ (ИЗ МАКЕТА)", bg="#FFD700", font=("Arial", 9, "bold"), command=self.app.create_project)
+        self.btn_create_proj = tk.Button(frame_proj, text="📁 НОВЫЙ ПРОЕКТ (ИЗ МАКЕТА)", bg="#FFD700", font=("Arial", 9, "bold"), command=self.app.controller.create_project)
         self.btn_create_proj.pack(fill=tk.X, pady=(0, 5))
         
         frame_io = tk.Frame(frame_proj)
         frame_io.pack(fill=tk.X, pady=(0, 5))
-        self.btn_load_proj = tk.Button(frame_io, text="📂 ЗАГРУЗИТЬ", bg="#e0e0e0", font=("Arial", 8, "bold"), command=self.app.load_project)
+        self.btn_load_proj = tk.Button(frame_io, text="📂 ЗАГРУЗИТЬ", bg="#e0e0e0", font=("Arial", 8, "bold"), command=self.app.controller.load_project)
         self.btn_load_proj.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
-        self.btn_save_proj = tk.Button(frame_io, text="💾 СОХРАНИТЬ", bg="#87CEEB", font=("Arial", 8, "bold"), command=self.app.save_project, state=tk.DISABLED)
+        self.btn_save_proj = tk.Button(frame_io, text="💾 СОХРАНИТЬ", bg="#87CEEB", font=("Arial", 8, "bold"), command=self.app.controller.save_project, state=tk.DISABLED)
         self.btn_save_proj.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
 
         self.lbl_proj_info = tk.Label(frame_proj, text="Проект не загружен", fg="gray", justify=tk.LEFT, wraplength=400)
@@ -81,11 +81,11 @@ class UIBuilder:
         self.entry_loop_area.insert(0, "1.0")
         self.entry_loop_area.grid(row=1, column=1, sticky=tk.W, padx=5)
 
-        self.btn_step1 = tk.Button(frame_prep, text="ШАГ 1: Извлечь векторы", bg="#e0e0e0", command=self.app.do_step1)
+        self.btn_step1 = tk.Button(frame_prep, text="ШАГ 1: Извлечь векторы", bg="#e0e0e0", command=self.app.controller.do_step1)
         self.btn_step1.pack(fill=tk.X, pady=2)
-        self.btn_step2 = tk.Button(frame_prep, text="ШАГ 2: Анализ ошибок", bg="#e0e0e0", command=self.app.do_step2)
+        self.btn_step2 = tk.Button(frame_prep, text="ШАГ 2: Анализ ошибок", bg="#e0e0e0", command=self.app.controller.do_step2)
         self.btn_step2.pack(fill=tk.X, pady=2)
-        self.btn_step3 = tk.Button(frame_prep, text="ШАГ 3: Вылечить (Автосохранение)", bg="#87CEEB", font=("Arial", 9, "bold"), command=self.app.do_step3)
+        self.btn_step3 = tk.Button(frame_prep, text="ШАГ 3: Вылечить (Автосохранение)", bg="#87CEEB", font=("Arial", 9, "bold"), command=self.app.controller.do_step3)
         self.btn_step3.pack(fill=tk.X, pady=2)
 
         frame_crop = tk.Frame(frame_prep)
@@ -94,10 +94,10 @@ class UIBuilder:
         self.entry_crop_margin = tk.Entry(frame_crop, width=6)
         self.entry_crop_margin.insert(0, "10.0")
         self.entry_crop_margin.pack(side=tk.LEFT, padx=5)
-        self.btn_crop_marks = tk.Button(frame_crop, text="✂️ Добавить метки", bg="#FFDAB9", font=("Arial", 8, "bold"), command=self.app.do_add_crop_marks)
+        self.btn_crop_marks = tk.Button(frame_crop, text="✂️ Добавить метки", bg="#FFDAB9", font=("Arial", 8, "bold"), command=self.app.controller.do_add_crop_marks)
         self.btn_crop_marks.pack(side=tk.RIGHT, fill=tk.X, expand=True)
 
-        self.btn_reset = tk.Button(frame_prep, text="↺ Сбросить к исходнику", bg="#FFDAB9", command=self.app.do_reset)
+        self.btn_reset = tk.Button(frame_prep, text="↺ Сбросить к исходнику", bg="#FFDAB9", command=self.app.controller.do_reset)
         self.btn_reset.pack(fill=tk.X, pady=(2, 0))
 
         frame_dist = tk.LabelFrame(self.frame_left, text="3. Расчет Дисторсии (Сжатие)", padx=10, pady=10, bg="#F0F8FF")
@@ -136,16 +136,16 @@ class UIBuilder:
         dist_btns = tk.Frame(frame_dist, bg="#F0F8FF")
         dist_btns.pack(fill=tk.X, pady=(5, 0))
         
-        self.btn_analyze_array = tk.Button(dist_btns, text="🔍 Анализ", bg="#FFD700", font=("Arial", 9, "bold"), command=self.app.do_analyze_array)
+        self.btn_analyze_array = tk.Button(dist_btns, text="🔍 Анализ", bg="#FFD700", font=("Arial", 9, "bold"), command=self.app.controller.do_analyze_array)
         self.btn_analyze_array.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
         
-        self.btn_generate_array = tk.Button(dist_btns, text="🔲 Создать", bg="#FFA500", font=("Arial", 9, "bold"), command=self.app.open_array_generator)
+        self.btn_generate_array = tk.Button(dist_btns, text="🔲 Создать", bg="#FFA500", font=("Arial", 9, "bold"), command=self.app.controller.open_array_generator)
         self.btn_generate_array.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
         
-        self.btn_apply_dist = tk.Button(dist_btns, text="Сжать", bg="#4169E1", fg="white", font=("Arial", 9, "bold"), command=self.app.do_apply_distortion)
+        self.btn_apply_dist = tk.Button(dist_btns, text="Сжать", bg="#4169E1", fg="white", font=("Arial", 9, "bold"), command=self.app.controller.do_apply_distortion)
         self.btn_apply_dist.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
         
-        self.btn_rotate = tk.Button(dist_btns, text="↻ 90°", bg="#e0e0e0", command=self.app.do_rotate_90)
+        self.btn_rotate = tk.Button(dist_btns, text="↻ 90°", bg="#e0e0e0", command=self.app.controller.do_rotate_90)
         self.btn_rotate.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 0))
 
         frame_edit = tk.LabelFrame(self.frame_left, text="4. Ручное Редактирование", padx=10, pady=10)
@@ -161,10 +161,10 @@ class UIBuilder:
         btn_frame_edit.pack(fill=tk.X, pady=2)
         self.btn_delete_path = tk.Button(btn_frame_edit, text="🗑 Удалить контур", bg="#e0e0e0", command=lambda: self.app.canvas_manager.on_delete_key(None))
         self.btn_delete_path.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
-        self.btn_delete_node = tk.Button(btn_frame_edit, text="❌ Режим: Удалить узел", bg="#e0e0e0", command=self.app.toggle_delete_node_mode)
+        self.btn_delete_node = tk.Button(btn_frame_edit, text="❌ Режим: Удалить узел", bg="#e0e0e0", command=self.app.controller.toggle_delete_node_mode)
         self.btn_delete_node.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
         
-        self.btn_live_edit = tk.Button(frame_edit, text="✏️ Открыть в Inkscape (Live Edit)", bg="#FFB6C1", font=("Arial", 9, "bold"), command=self.app.do_live_edit)
+        self.btn_live_edit = tk.Button(frame_edit, text="✏️ Открыть в Inkscape (Live Edit)", bg="#FFB6C1", font=("Arial", 9, "bold"), command=self.app.controller.do_live_edit)
         self.btn_live_edit.pack(fill=tk.X, pady=(5, 2))
 
         frame_export = tk.LabelFrame(self.frame_left, text="5. Производство (Экспорт)", padx=10, pady=10)
@@ -185,7 +185,7 @@ class UIBuilder:
         self.entry_mark_margin.insert(0, "10.0")
         self.entry_mark_margin.pack(side=tk.LEFT)
 
-        self.btn_mask = tk.Button(frame_export, text="🖨 Создать УФ-Маску (.PDF)", bg="#9370DB", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.app.export_uv_mask)
+        self.btn_mask = tk.Button(frame_export, text="🖨 Создать УФ-Маску (.PDF)", bg="#9370DB", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.app.controller.export_uv_mask)
         self.btn_mask.pack(fill=tk.X, pady=(0, 10))
         
         frame_cnc_tools = tk.LabelFrame(frame_export, text="🛠 Настройки ЧПУ", padx=5, pady=5, bg="#f9f9f9")
@@ -213,10 +213,14 @@ class UIBuilder:
         self.combo_milling_dir = ttk.Combobox(frame_cnc_tools, textvariable=self.var_milling_dir, state="readonly", width=18, values=["Climb (Попутное)", "Conventional (Встречное)"])
         self.combo_milling_dir.grid(row=4, column=1, padx=5, pady=2)
 
-        self.btn_cnc = tk.Button(frame_export, text="⚙️ Сгенерировать УП", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.app.export_cnc)
+        # НОВАЯ КНОПКА КАЛИБРОВКИ
+        self.btn_calibrate = tk.Button(frame_export, text="🎯 Калибровка ЧПУ по меткам", bg="#FFDAB9", font=("Arial", 9, "bold"), state=tk.DISABLED, command=self.app.controller.do_calibrate_cnc)
+        self.btn_calibrate.pack(fill=tk.X, pady=(0, 5))
+
+        self.btn_cnc = tk.Button(frame_export, text="⚙️ Сгенерировать УП", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.app.controller.export_cnc)
         self.btn_cnc.pack(fill=tk.X, pady=2)
         
-        self.btn_report = tk.Button(frame_export, text="📄 Создать Техкарту (.PDF)", bg="#20B2AA", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.app.generate_report)
+        self.btn_report = tk.Button(frame_export, text="📄 Создать Техкарту (.PDF)", bg="#20B2AA", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self.app.controller.generate_report)
         self.btn_report.pack(fill=tk.X, pady=(5, 2))
 
         frame_log = tk.LabelFrame(self.frame_left, text="Лог работы", padx=10, pady=5)
@@ -236,7 +240,7 @@ class UIBuilder:
 
         frame_tools = tk.Frame(self.frame_right)
         frame_tools.pack(fill=tk.X, pady=(0, 5))
-        self.btn_measure = tk.Button(frame_tools, text="📏 Замер", bg="#e0e0e0", command=self.app.toggle_measure)
+        self.btn_measure = tk.Button(frame_tools, text="📏 Замер", bg="#e0e0e0", command=self.app.controller.toggle_measure)
         self.btn_measure.pack(side=tk.LEFT)
         
         frame_layers = tk.LabelFrame(self.frame_right, text="Слои видимости", padx=5, pady=5)
@@ -273,7 +277,7 @@ class UIBuilder:
                    self.btn_analyze_array, self.btn_generate_array, self.btn_apply_dist, self.btn_rotate, 
                    self.btn_live_edit, self.btn_mask, self.btn_cnc, self.btn_create_proj, self.btn_measure, 
                    self.btn_delete_path, self.btn_delete_node, self.btn_clear_log, self.btn_copy_log,
-                   self.btn_load_proj, self.btn_save_proj, self.btn_report]
+                   self.btn_load_proj, self.btn_save_proj, self.btn_report, self.btn_calibrate]
         for btn in buttons:
             try: btn.config(state=tk.DISABLED)
             except: pass
@@ -289,5 +293,5 @@ class UIBuilder:
             try: btn.config(state=tk.NORMAL)
             except: pass
         self.combo_milling_dir.config(state="readonly")
-        if not self.app.current_project_dir: self.btn_save_proj.config(state=tk.DISABLED)
-        if self.app.last_milling_time_min > 0: self.btn_report.config(state=tk.NORMAL)
+        if not self.app.project.current_project_dir: self.btn_save_proj.config(state=tk.DISABLED)
+        if self.app.project.last_milling_time_min > 0: self.btn_report.config(state=tk.NORMAL)

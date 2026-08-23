@@ -83,13 +83,13 @@ class CanvasManager:
 
     def get_visible_paths(self):
         visible = []
-        if self.app.show_raw.get(): visible.extend(self.app.layers.get("raw", []))
-        if self.app.show_healed.get(): visible.extend(self.app.layers.get("healed", []))
-        if self.app.show_array.get(): visible.extend(self.app.layers.get("array", []))
-        if self.app.show_distorted.get(): visible.extend(self.app.layers.get("distorted", []))
-        if self.app.show_mask.get(): visible.extend(self.app.layers.get("mask", []))
-        if self.app.show_ideal.get(): visible.extend(self.app.layers.get("ideal", []))
-        if self.app.show_cnc.get(): visible.extend(self.app.layers.get("cnc", []))
+        if self.app.ui.show_raw.get(): visible.extend(self.app.project.layers.get("raw", []))
+        if self.app.ui.show_healed.get(): visible.extend(self.app.project.layers.get("healed", []))
+        if self.app.ui.show_array.get(): visible.extend(self.app.project.layers.get("array", []))
+        if self.app.ui.show_distorted.get(): visible.extend(self.app.project.layers.get("distorted", []))
+        if self.app.ui.show_mask.get(): visible.extend(self.app.project.layers.get("mask", []))
+        if self.app.ui.show_ideal.get(): visible.extend(self.app.project.layers.get("ideal", []))
+        if self.app.ui.show_cnc.get(): visible.extend(self.app.project.layers.get("cnc", []))
         return visible
 
     def get_snapped_coords(self, sx, sy):
@@ -177,13 +177,13 @@ class CanvasManager:
     def on_delete_key(self, event):
         if not self.selected_path: return
         if self.weld_anchor and self.weld_anchor[0] == self.selected_path: self.weld_anchor = None
-        if self.selected_path in self.app.raw_paths: self.app.raw_paths.remove(self.selected_path)
-        if self.selected_path in self.app.ready_paths: self.app.ready_paths.remove(self.selected_path)
-        if self.selected_path in self.app.distorted_paths: self.app.distorted_paths.remove(self.selected_path)
-        for layer_paths in self.app.layers.values():
+        if self.selected_path in self.app.project.raw_paths: self.app.project.raw_paths.remove(self.selected_path)
+        if self.selected_path in self.app.project.ready_paths: self.app.project.ready_paths.remove(self.selected_path)
+        if self.selected_path in self.app.project.distorted_paths: self.app.project.distorted_paths.remove(self.selected_path)
+        for layer_paths in self.app.project.layers.values():
             if self.selected_path in layer_paths: layer_paths.remove(self.selected_path)
         self.selected_path = None
-        self.app.invalidate_downstream()
+        self.app.controller.invalidate_downstream()
         self.render_canvas()
         self.app.log("Вектор удален вручную.")
 
@@ -209,7 +209,7 @@ class CanvasManager:
                 new_pt = (first_pt[0], first_pt[1], first_pt[2]) if len(first_pt) > 2 else (first_pt[0], first_pt[1])
                 self.selected_path.points.append(new_pt)
         self.selected_path.is_closed = True
-        self.app.invalidate_downstream()
+        self.app.controller.invalidate_downstream()
         self.render_canvas()
         self.app.log("Успех: Выделенный контур замкнут (клавиша C).")
 
@@ -219,7 +219,7 @@ class CanvasManager:
         if seg_i is not None and proj_pt:
             new_pt = (proj_pt[0], proj_pt[1])
             self.selected_path.points.insert(seg_i + 1, new_pt)
-            self.app.invalidate_downstream()
+            self.app.controller.invalidate_downstream()
             self.render_canvas()
             self.app.log(f"Узел добавлен (Индекс: {seg_i + 1}).")
 
@@ -230,7 +230,7 @@ class CanvasManager:
             self.selected_path.points.pop(idx)
             if len(self.selected_path.points) < 2: self.on_delete_key(None)
             else:
-                self.app.invalidate_downstream()
+                self.app.controller.invalidate_downstream()
                 self.render_canvas()
                 self.app.log(f"Узел удален (Индекс: {idx}).")
 
@@ -249,12 +249,12 @@ class CanvasManager:
             pts1 = pts[:seg_i+1]
             pts2 = pts[seg_i+1:]
             
-            target_list = self.app.distorted_paths if self.selected_path in self.app.distorted_paths else (self.app.ready_paths if self.selected_path in self.app.ready_paths else self.app.raw_paths)
+            target_list = self.app.project.distorted_paths if self.selected_path in self.app.project.distorted_paths else (self.app.project.ready_paths if self.selected_path in self.app.project.ready_paths else self.app.project.raw_paths)
             layer_name = self.selected_path.layer_name
             if self.selected_path in target_list: target_list.remove(self.selected_path)
             
-            target_layer = self.app.layers.get("raw")
-            for layer_paths in self.app.layers.values():
+            target_layer = self.app.project.layers.get("raw")
+            for layer_paths in self.app.project.layers.values():
                 if self.selected_path in layer_paths:
                     layer_paths.remove(self.selected_path)
                     target_layer = layer_paths
@@ -269,7 +269,7 @@ class CanvasManager:
                 target_list.append(cp2)
                 if target_layer is not None: target_layer.append(cp2)
             self.app.log("Открытый контур разделен на две части.")
-        self.app.invalidate_downstream()
+        self.app.controller.invalidate_downstream()
         self.render_canvas()
 
     def on_key_join_nodes(self):
@@ -317,15 +317,15 @@ class CanvasManager:
                 pts1.reverse()
                 merged = pts1 + pts2
             p1.points = merged
-            if p2 in self.app.raw_paths: self.app.raw_paths.remove(p2)
-            if p2 in self.app.ready_paths: self.app.ready_paths.remove(p2)
-            if p2 in self.app.distorted_paths: self.app.distorted_paths.remove(p2)
-            for layer_paths in self.app.layers.values():
+            if p2 in self.app.project.raw_paths: self.app.project.raw_paths.remove(p2)
+            if p2 in self.app.project.ready_paths: self.app.project.ready_paths.remove(p2)
+            if p2 in self.app.project.distorted_paths: self.app.project.distorted_paths.remove(p2)
+            for layer_paths in self.app.project.layers.values():
                 if p2 in layer_paths: layer_paths.remove(p2)
             self.selected_path = p1
             self.app.log("Успех: Два вектора сшиты в один!")
         self.weld_anchor = None
-        self.app.invalidate_downstream()
+        self.app.controller.invalidate_downstream()
         self.render_canvas()
 
     def on_left_click(self, event):
@@ -354,13 +354,13 @@ class CanvasManager:
                 path, idx = match
                 path.points.pop(idx)
                 if len(path.points) < 2:
-                    if path in self.app.raw_paths: self.app.raw_paths.remove(path)
-                    if path in self.app.ready_paths: self.app.ready_paths.remove(path)
-                    if path in self.app.distorted_paths: self.app.distorted_paths.remove(path)
-                    for layer_paths in self.app.layers.values():
+                    if path in self.app.project.raw_paths: self.app.project.raw_paths.remove(path)
+                    if path in self.app.project.ready_paths: self.app.project.ready_paths.remove(path)
+                    if path in self.app.project.distorted_paths: self.app.project.distorted_paths.remove(path)
+                    for layer_paths in self.app.project.layers.values():
                         if path in layer_paths: layer_paths.remove(path)
                     if self.selected_path == path: self.selected_path = None
-                self.app.invalidate_downstream()
+                self.app.controller.invalidate_downstream()
                 self.render_canvas()
                 self.app.log("Узел удален кликом.")
             return
@@ -386,7 +386,7 @@ class CanvasManager:
             self.measure_pt1 = None
             self.canvas.delete("measure_dynamic")
         elif self.is_delete_node_mode: 
-            self.app.toggle_delete_node_mode()
+            self.app.controller.toggle_delete_node_mode()
         elif self.weld_anchor:
             self.weld_anchor = None
             self.app.log("Сварка отменена.")
@@ -461,7 +461,7 @@ class CanvasManager:
                     first_pt = self.selected_path.points[0]
                     if math.hypot(old_pt[0] - first_pt[0], old_pt[1] - first_pt[1]) < 1e-4:
                         self.selected_path.points[0] = (wx, wy, first_pt[2]) if len(first_pt) > 2 else (wx, wy)
-            self.app.invalidate_downstream()
+            self.app.controller.invalidate_downstream()
             self.render_canvas()
             self.on_mouse_move(event)
             return
@@ -528,21 +528,15 @@ class CanvasManager:
             sx = x_world * self.current_scale + self.current_tx
             self.ruler_x.create_line(sx, 15, sx, 25, fill="black")
             self.ruler_x.create_text(sx + 2, 2, text=f"{x_world:g}", anchor=tk.NW, font=("Arial", 7))
-            
-            # --- ОСНОВНАЯ СЕТКА ПО X ---
             self.canvas.create_line(sx, 0, sx, h, fill="#2a2a2a", dash=(2, 4), tags="grid")
-            
             for i in range(1, 10):
                 minor_x_world = x_world + i * (step / 10)
                 if minor_x_world > end_x_world: break
                 msx = minor_x_world * self.current_scale + self.current_tx
                 tick_h = 20 if i == 5 else 22
                 self.ruler_x.create_line(msx, tick_h, msx, 25, fill="gray")
-                
-                # --- ПРОМЕЖУТОЧНАЯ СЕТКА ПО X (только по центру) ---
                 if i == 5:
                     self.canvas.create_line(msx, 0, msx, h, fill="#222222", dash=(1, 5), tags="grid")
-                    
             x_world += step
             limit += 1
 
@@ -556,34 +550,27 @@ class CanvasManager:
             sy = h - (y_world * self.current_scale + self.current_ty)
             self.ruler_y.create_line(15, sy, 25, sy, fill="black")
             self.ruler_y.create_text(13, sy - 2, text=f"{y_world:g}", anchor=tk.SE, font=("Arial", 7), angle=90)
-            
-            # --- ОСНОВНАЯ СЕТКА ПО Y ---
             self.canvas.create_line(0, sy, w, sy, fill="#2a2a2a", dash=(2, 4), tags="grid")
-            
             for i in range(1, 10):
                 minor_y_world = y_world + i * (step / 10)
                 if minor_y_world > end_y_world: break
                 msy = h - (minor_y_world * self.current_scale + self.current_ty)
                 tick_w = 20 if i == 5 else 22
                 self.ruler_y.create_line(tick_w, msy, 25, msy, fill="gray")
-                
-                # --- ПРОМЕЖУТОЧНАЯ СЕТКА ПО Y (только по центру) ---
                 if i == 5:
                     self.canvas.create_line(0, msy, w, msy, fill="#222222", dash=(1, 5), tags="grid")
-                    
             y_world += step
             limit += 1
             
-        # Опускаем сетку на самый нижний слой, чтобы векторы рисовались поверх нее
         self.canvas.tag_lower("grid")
 
     def render_canvas(self):
         self.canvas.delete("all")
         self.canvas_h = self.canvas.winfo_height()
         
-        if self.app.show_rapids.get() and self.app.layers.get("cnc", []):
+        if self.app.ui.show_rapids.get() and self.app.project.layers.get("cnc", []):
             curr_pos = (0.0, 0.0)
-            for path in self.app.layers["cnc"]:
+            for path in self.app.project.layers["cnc"]:
                 if not path.points: continue
                 start_pt = path.points[0]
                 sx1 = curr_pos[0] * self.current_scale + self.current_tx
@@ -604,13 +591,13 @@ class CanvasManager:
                 self.canvas.create_line(sx1, sy1, sx2, sy2, fill="#FF8C00", width=1.5, dash=(4, 4))
         
         layers_to_draw = [
-            (self.app.show_raw, self.app.layers.get("raw", []), "#555555", 1.0, None),
-            (self.app.show_healed, self.app.layers.get("healed", []), "#00FFFF", 1.5, None),
-            (self.app.show_array, self.app.layers.get("array", []), "#9370DB", 1.5, None),
-            (self.app.show_distorted, self.app.layers.get("distorted", []), "#1E90FF", 1.5, None),
-            (self.app.show_mask, self.app.layers.get("mask", []), "#FF1493", 2.0, None),
-            (self.app.show_ideal, self.app.layers.get("ideal", []), "#FFFF00", 2.0, None), 
-            (self.app.show_cnc, self.app.layers.get("cnc", []), "#00FF00", 1.5, (5, 5))
+            (self.app.ui.show_raw, self.app.project.layers.get("raw", []), "#555555", 1.0, None),
+            (self.app.ui.show_healed, self.app.project.layers.get("healed", []), "#00FFFF", 1.5, None),
+            (self.app.ui.show_array, self.app.project.layers.get("array", []), "#9370DB", 1.5, None),
+            (self.app.ui.show_distorted, self.app.project.layers.get("distorted", []), "#1E90FF", 1.5, None),
+            (self.app.ui.show_mask, self.app.project.layers.get("mask", []), "#FF1493", 2.0, None),
+            (self.app.ui.show_ideal, self.app.project.layers.get("ideal", []), "#FFFF00", 2.0, None), 
+            (self.app.ui.show_cnc, self.app.project.layers.get("cnc", []), "#00FF00", 1.5, (5, 5))
         ]
         
         for show_var, paths, color, width, dash in layers_to_draw:
@@ -650,13 +637,13 @@ class CanvasManager:
                 self.canvas.create_oval(nx-6, ny-6, nx+6, ny+6, outline="#00FF00", width=2, tags="weld_anchor")
 
         colors = {"red": "#FF0000", "orange": "#FFA500", "magenta": "#FF00FF", "yellow": "#FFFF00"}
-        for k, pts in self.app.error_markers.items():
+        for k, pts in self.app.project.error_markers.items():
             for x, y in pts:
                 sx, sy = x * self.current_scale + self.current_tx, self.canvas_h - (y * self.current_scale + self.current_ty)
                 self.canvas.create_oval(sx-5, sy-5, sx+5, sy+5, outline=colors[k], width=2, tags="error_marker")
 
         cx, cy = 40, self.canvas_h - 40
-        axis = self.app.var_dist_axis.get()
+        axis = self.app.ui.var_dist_axis.get()
         x_width = 4 if axis == "X" else 1
         y_width = 4 if axis == "Y" else 1
         
@@ -666,7 +653,7 @@ class CanvasManager:
         self.canvas.create_text(cx, cy - 55, text="Y", fill="#32CD32", font=("Arial", 10, "bold"), anchor=tk.S, tags="ucs")
         self.canvas.create_oval(cx-3, cy-3, cx+3, cy+3, fill="white", tags="ucs")
         
-        if self.app.is_distorted:
-            self.canvas.create_text(cx, cy - 80, text=f"⚠️ ДИСТОРСИЯ ПРИМЕНЕНА ({self.app.applied_dist_axis})", fill="#FF4500", font=("Arial", 10, "bold"), anchor=tk.SW, tags="ucs")
+        if self.app.project.is_distorted:
+            self.canvas.create_text(cx, cy - 80, text=f"⚠️ ДИСТОРСИЯ ПРИМЕНЕНА ({self.app.project.applied_dist_axis})", fill="#FF4500", font=("Arial", 10, "bold"), anchor=tk.SW, tags="ucs")
 
         self._draw_rulers()
