@@ -265,3 +265,48 @@ class GcodeResultDTO(BaseModel):
     ideal_paths: list[CamPathDTO] = Field(default_factory=list)
     cnc_paths: list[CamPathDTO] = Field(default_factory=list)
     time_min: float = 0.0
+
+
+# ============================================================
+# Фаза 4: сервис state (tools/postprocessors/документы проекта)
+# ============================================================
+
+class ToolsPayloadDTO(BaseModel):
+    """Список фрез для загрузки/сохранения в БД state-сервиса."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    tools: list[ToolDTO] = Field(default_factory=list)
+
+
+class PostsPayloadDTO(BaseModel):
+    """Список постпроцессоров для загрузки/сохранения в БД state-сервиса."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    posts: list[PostProcessorDTO] = Field(default_factory=list)
+
+
+class SaveResultDTO(BaseModel):
+    """Результат сохранения: сколько записей записано."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    count: int = 0
+
+
+class StatePathDTO(BaseModel):
+    """Путь к документу проекта (project_state.json): запрос загрузки / ответ сохранения."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    path: str
+
+
+class StateDocDTO(BaseModel):
+    """Документ проекта: путь + произвольный JSON."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    path: str
+    data: dict = Field(default_factory=dict)

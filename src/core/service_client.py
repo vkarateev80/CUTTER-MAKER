@@ -1,17 +1,22 @@
-"""ServiceClient: вызовы сервисов ingest/render/geometry/math/cam по HTTP с локальным fallback.
+"""ServiceClient: вызовы сервисов ingest/render/geometry/math/cam/state по HTTP с локальным fallback.
 
 Поведение:
-- сервис доступен → задача уходит в него (POST /v1/... → polling /v1/jobs/{id});
-- ConnectError/ConnectTimeout → операция выполняется локально тем же кодом
-  (десктоп работает и без запущенных сервисов);
-- ошибка самой задачи (статус error) НЕ маскируется fallback'ом —
-  это реальный сбой вычисления, он одинаков локально и в сервисе;
-- HTTP 422/500 тоже НЕ уводятся в fallback — это баг клиента или сервиса.
+- сервис доступен → задача уходит в него (compute: POST → polling /v1/jobs/{id};
+  state: синхронный POST, результат сразу);
+- ConnectError/ConnectTimeout/HTTP 503 → операция выполняется локально тем же
+  кодом (десктоп работает и без запущенных сервисов); 503 отдаёт gateway,
+  когда его бэкенд недоступен;
+- ошибка самой задачи (статус error), 4xx/500 НЕ маскируются fallback'ом —
+  это реальный сбой, он одинаков локально и в сервисе.
 
-URL задаётся env-переменными; пустая строка принудительно отключает сервис
-(локальное выполнение без попытки соединения).
+Режимы URL:
+- прямой (по умолчанию): каждый сервис по своему env URL;
+- gateway: CUTTER_GATEEND_URL задан → ВСЕ операции идут на один URL
+  {gateway}/{service}/..., а gateway проксирует на бэкенды;
+- пустая строка URL сервиса принудительно отключает его (локально).
 """
 
+import json
 import os
 import time
 from pathlib import Path
@@ -33,12 +38,19 @@ from contracts import (
     PathsResultDTO,
     PatternRequestDTO,
     PatternResultDTO,
+    PostsPayloadDTO,
     ReportRequestDTO,
     ReportResultDTO,
     RotateRequestDTO,
+    SaveResultDTO,
+    StateDocDTO,
+    ToolDTO,
+    ToolsPayloadDTO,
     UvMaskRequestDTO,
     UvMaskResultDTO,
 )
+from src.db.db_manager import DatabaseManager
+from src.db.models import PostProcessor, Tool
 from src.optimizer.pattern_recognition import PatternRecognizer
 from src.parser.geometry import CamPath
 from src.pipeline.cam_pipeline import CamPipeline
@@ -56,6 +68,8 @@ class ServiceClient:
         geometry_url: str | None = None,
         math_url: str | None = None,
         cam_url: str | None = None,
+        state_url: str | None = None,
+        gateway_url: str | None = None,
         job_timeout: float = 300.0,
     ):
         self.ingest_url = self._resolve(ingest_url, "CUTTER_INGEST_URL", "http://127.0.0.1:8765")
@@ -63,31 +77,64 @@ class ServiceClient:
         self.geometry_url = self._resolve(geometry_url, "CUTTER_GEOMETRY_URL", "http://127.0.0.1:8767")
         self.math_url = self._resolve(math_url, "CUTTER_MATH_URL", "http://127.0.0.1:8768")
         self.cam_url = self._resolve(cam_url, "CUTTER_CAM_URL", "http://127.0.0.1:8769")
+        self.state_url = self._resolve(state_url, "CUTTER_STATE_URL", "http://127.0.0.1:8770")
+        # "" = gateway выключен (прямые URL сервисов); задан → все операции через него
+        self.gateway_url = self._resolve(gateway_url, "CUTTER_GATEWAY_URL", "")
         self.job_timeout = job_timeout
 
     @staticmethod
     def _resolve(explicit: str | None, env_name: str, default: str) -> str:
         value = explicit if explicit is not None else os.environ.get(env_name, default)
-        return value.rstrip("/")
+        return (value or "").rstrip("/")
 
     # ==========================================================
     # инфраструктура
     # ==========================================================
 
-    def _call(self, url: str, service: str, path: str, payload: dict) -> dict | None:
-        """POST задачи + polling. None = сервис недоступен/отключён (нужен fallback)."""
-        if not url:
+    def _base(self, service: str) -> str:
+        """Базовый URL операции: gateway-режим или прямой URL сервиса."""
+        if self.gateway_url:
+            return f"{self.gateway_url}/{service}"
+        return getattr(self, f"{service}_url")
+
+    def _call(self, service: str, path: str, payload: dict) -> dict | None:
+        """POST compute-задачи + polling. None = сервис недоступен (нужен fallback)."""
+        base = self._base(service)
+        if not base:
             return None
         try:
             r = httpx.post(
-                f"{url}{path}",
+                f"{base}{path}",
                 json=payload,
                 timeout=httpx.Timeout(30.0, connect=_CONNECT_TIMEOUT),
             )
+            if r.status_code == 503:
+                print(f"[КЛИЕНТ] {service} недоступен (503 от {base}) — выполняю локально")
+                return None
             r.raise_for_status()
-            return self._wait(url, r.json()["job_id"])
+            return self._wait(base, r.json()["job_id"])
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-            print(f"[КЛИЕНТ] {service} недоступен ({url}): {e.__class__.__name__} — выполняю локально")
+            print(f"[КЛИЕНТ] {service} недоступен ({base}): {e.__class__.__name__} — выполняю локально")
+            return None
+
+    def _post_sync(self, service: str, path: str, payload: dict) -> dict | None:
+        """Синхронный POST (state-сервис). None = сервис недоступен (нужен fallback)."""
+        base = self._base(service)
+        if not base:
+            return None
+        try:
+            r = httpx.post(
+                f"{base}{path}",
+                json=payload,
+                timeout=httpx.Timeout(30.0, connect=_CONNECT_TIMEOUT),
+            )
+            if r.status_code == 503:
+                print(f"[КЛИЕНТ] {service} недоступен (503 от {base}) — выполняю локально")
+                return None
+            r.raise_for_status()
+            return r.json()
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            print(f"[КЛИЕНТ] {service} недоступен ({base}): {e.__class__.__name__} — выполняю локально")
             return None
 
     def _wait(self, base_url: str, job_id: str) -> dict:
@@ -107,26 +154,35 @@ class ServiceClient:
             time.sleep(_POLL_INTERVAL)
         raise TimeoutError(f"Задача {job_id} на {base_url} не завершилась за {self.job_timeout:.0f} с")
 
+    @staticmethod
+    def _local_db() -> DatabaseManager:
+        # Тот же корень, что и у state-сервиса: тесты меняют env, прод использует cwd
+        return DatabaseManager(root=os.environ.get("CUTTER_STATE_ROOT") or None)
+
     # ==========================================================
     # ingest: парсинг макета
     # ==========================================================
 
     def parse(self, input_path: str | Path) -> list[CamPath]:
-        if not self.ingest_url:
+        base = self._base("ingest")
+        if not base:
             return CamPipeline().step1_parse(input_path)
         try:
             with open(input_path, "rb") as f:
                 r = httpx.post(
-                    f"{self.ingest_url}/v1/parse",
+                    f"{base}/v1/parse",
                     files={"file": (Path(input_path).name, f)},
                     timeout=httpx.Timeout(30.0, connect=_CONNECT_TIMEOUT),
                 )
+            if r.status_code == 503:
+                print(f"[КЛИЕНТ] ingest недоступен (503 от {base}) — выполняю локально")
+                return CamPipeline().step1_parse(input_path)
             r.raise_for_status()
-            result = self._wait(self.ingest_url, r.json()["job_id"])
+            result = self._wait(base, r.json()["job_id"])
             parsed = ParseResultDTO.model_validate(result)
             return [CamPath.from_dto(p) for p in parsed.paths]
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-            print(f"[КЛИЕНТ] ingest недоступен ({self.ingest_url}): {e.__class__.__name__} — выполняю локально")
+            print(f"[КЛИЕНТ] ingest недоступен ({base}): {e.__class__.__name__} — выполняю локально")
             return CamPipeline().step1_parse(input_path)
 
     # ==========================================================
@@ -150,7 +206,7 @@ class ServiceClient:
             mark_d=mark_d,
             mark_margin=mark_margin,
         )
-        result = self._call(self.render_url, "render", "/v1/uv-mask", req.model_dump())
+        result = self._call("render", "/v1/uv-mask", req.model_dump())
         if result is not None:
             parsed = UvMaskResultDTO.model_validate(result)
             return (
@@ -179,7 +235,7 @@ class ServiceClient:
             paths=[p.to_dto() for p in paths],
             output_path=str(output_path),
         )
-        result = self._call(self.render_url, "render", "/v1/report", req.model_dump())
+        result = self._call("render", "/v1/report", req.model_dump())
         if result is not None:
             return ReportResultDTO.model_validate(result)
         ReportGenerator.generate(project_name, stats, paths, output_path)
@@ -193,7 +249,7 @@ class ServiceClient:
         req = CheckErrorsRequestDTO(
             paths=[p.to_dto() for p in paths], min_loop_area=min_loop_area
         )
-        result = self._call(self.geometry_url, "geometry", "/v1/check-errors", req.model_dump())
+        result = self._call("geometry", "/v1/check-errors", req.model_dump())
         if result is not None:
             return CheckErrorsResultDTO.model_validate(result).model_dump()
         return CamPipeline(min_loop_area=min_loop_area).step2_check_errors(paths)
@@ -210,7 +266,7 @@ class ServiceClient:
             tolerance=tolerance,
             min_loop_area=min_loop_area,
         )
-        result = self._call(self.geometry_url, "geometry", "/v1/heal", req.model_dump())
+        result = self._call("geometry", "/v1/heal", req.model_dump())
         if result is not None:
             parsed = PathsResultDTO.model_validate(result)
             return [CamPath.from_dto(p) for p in parsed.paths]
@@ -224,7 +280,7 @@ class ServiceClient:
 
     def analyze_pattern(self, paths: list[CamPath], tolerance: float = 0.5) -> dict:
         req = PatternRequestDTO(paths=[p.to_dto() for p in paths], tolerance=tolerance)
-        result = self._call(self.math_url, "math", "/v1/pattern", req.model_dump())
+        result = self._call("math", "/v1/pattern", req.model_dump())
         if result is not None:
             parsed = PatternResultDTO.model_validate(result)
             return {
@@ -250,7 +306,7 @@ class ServiceClient:
             paths=[p.to_dto() for p in paths],
             offsets=[tuple(o) for o in offsets],
         )
-        result = self._call(self.math_url, "math", "/v1/multiply", req.model_dump())
+        result = self._call("math", "/v1/multiply", req.model_dump())
         if result is not None:
             parsed = PathsResultDTO.model_validate(result)
             return [CamPath.from_dto(p) for p in parsed.paths]
@@ -266,7 +322,7 @@ class ServiceClient:
         req = DistortionRequestDTO(
             paths=[p.to_dto() for p in paths], factor=factor, axis=axis
         )
-        result = self._call(self.math_url, "math", "/v1/distortion", req.model_dump())
+        result = self._call("math", "/v1/distortion", req.model_dump())
         if result is not None:
             parsed = PathsResultDTO.model_validate(result)
             return [CamPath.from_dto(p) for p in parsed.paths]
@@ -280,7 +336,7 @@ class ServiceClient:
         req = RotateRequestDTO(
             paths=[p.to_dto() for p in paths], angle_deg=angle_deg
         )
-        result = self._call(self.math_url, "math", "/v1/rotate", req.model_dump())
+        result = self._call("math", "/v1/rotate", req.model_dump())
         if result is not None:
             parsed = PathsResultDTO.model_validate(result)
             return [CamPath.from_dto(p) for p in parsed.paths]
@@ -296,7 +352,7 @@ class ServiceClient:
         req = CropMarksRequestDTO(
             paths=[p.to_dto() for p in paths], rapport=rapport, width=width, axis=axis
         )
-        result = self._call(self.math_url, "math", "/v1/crop-marks", req.model_dump())
+        result = self._call("math", "/v1/crop-marks", req.model_dump())
         if result is not None:
             parsed = PathsResultDTO.model_validate(result)
             return [CamPath.from_dto(p) for p in parsed.paths]
@@ -327,7 +383,7 @@ class ServiceClient:
             lead_radius=lead_radius,
             milling_dir=milling_dir,
         )
-        result = self._call(self.cam_url, "cam", "/v1/gcode", req.model_dump())
+        result = self._call("cam", "/v1/gcode", req.model_dump())
         if result is not None:
             parsed = GcodeResultDTO.model_validate(result)
             return (
@@ -339,3 +395,98 @@ class ServiceClient:
             mask_geom, output_path, tool, post, mask_offset,
             enable_sharpening, lead_radius, milling_dir,
         )
+
+    # ==========================================================
+    # state: БД инструментов (фрезы)
+    # ==========================================================
+
+    def load_tools(self) -> list[Tool]:
+        result = self._post_sync("state", "/v1/tools/load", {})
+        if result is not None:
+            parsed = ToolsPayloadDTO.model_validate(result)
+            return [Tool.from_dto(t) for t in parsed.tools]
+        return self._local_db().load_tools()
+
+    def save_tools(self, tools: list[Tool]) -> None:
+        req = ToolsPayloadDTO(tools=[t.to_dto() for t in tools])
+        result = self._post_sync("state", "/v1/tools/save", req.model_dump())
+        if result is None:
+            self._local_db().save_tools(tools)
+
+    def import_tools(self, filepath: str | Path) -> None:
+        """Импорт из внешнего файла: чтение всегда локально (filedialog → наш хост)."""
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                new_tools = [Tool.from_dict(item) for item in json.load(f)]
+        except Exception as e:
+            raise RuntimeError(f"Не удалось импортировать инструменты: {e}")
+        tools = self.load_tools()
+        tools.extend(new_tools)
+        self.save_tools(tools)
+
+    def export_tools(self, filepath: str | Path) -> None:
+        try:
+            tools = self.load_tools()
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump([t.to_dict() for t in tools], f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            raise RuntimeError(f"Не удалось экспортировать инструменты: {e}")
+
+    # ==========================================================
+    # state: БД постпроцессоров
+    # ==========================================================
+
+    def load_postprocessors(self) -> list[PostProcessor]:
+        result = self._post_sync("state", "/v1/posts/load", {})
+        if result is not None:
+            parsed = PostsPayloadDTO.model_validate(result)
+            return [PostProcessor.from_dto(p) for p in parsed.posts]
+        return self._local_db().load_postprocessors()
+
+    def save_postprocessors(self, posts: list[PostProcessor]) -> None:
+        req = PostsPayloadDTO(posts=[p.to_dto() for p in posts])
+        result = self._post_sync("state", "/v1/posts/save", req.model_dump())
+        if result is None:
+            self._local_db().save_postprocessors(posts)
+
+    def import_postprocessors(self, filepath: str | Path) -> None:
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                new_posts = [PostProcessor.from_dict(item) for item in json.load(f)]
+        except Exception as e:
+            raise RuntimeError(f"Не удалось импортировать постпроцессоры: {e}")
+        posts = self.load_postprocessors()
+        posts.extend(new_posts)
+        self.save_postprocessors(posts)
+
+    def export_postprocessors(self, filepath: str | Path) -> None:
+        try:
+            posts = self.load_postprocessors()
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump([p.to_dict() for p in posts], f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            raise RuntimeError(f"Не удалось экспортировать постпроцессоры: {e}")
+
+    # ==========================================================
+    # state: документы проектов (project_state.json)
+    # ==========================================================
+
+    def save_project_doc(self, path: str | Path, data: dict) -> None:
+        req = StateDocDTO(path=str(path), data=data)
+        result = self._post_sync("state", "/v1/project/save", req.model_dump())
+        if result is None:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+
+    def load_project_doc(self, path: str | Path) -> dict:
+        try:
+            result = self._post_sync("state", "/v1/project/load", {"path": str(path)})
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                # Сервис жив, файла нет — как и локальный open() бросил бы FileNotFoundError
+                raise FileNotFoundError(f"Файл проекта не найден: {path}")
+            raise
+        if result is not None:
+            return StateDocDTO.model_validate(result).data
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)

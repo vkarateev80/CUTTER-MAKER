@@ -3,7 +3,6 @@ from tkinter import messagebox, filedialog, ttk
 import math
 from pathlib import Path
 from src.db.models import Tool
-from src.db.db_manager import DatabaseManager
 
 class FeedsSpeedsCalculator(tk.Toplevel):
     def __init__(self, parent, angle: float, tip: float, depth: float):
@@ -115,15 +114,15 @@ class FeedsSpeedsCalculator(tk.Toplevel):
 
 
 class ToolManagerWindow(tk.Toplevel):
-    def __init__(self, parent):
+    def __init__(self, parent, services):
         super().__init__(parent)
         self.title("Менеджер библиотеки инструментов (Фрезы)")
         self.geometry("750x480") # Слегка увеличили высоту окна под новую кнопку
         self.transient(parent)
         self.grab_set()
         self.resizable(False, False)
-        self.db = DatabaseManager()
-        self.tools = self.db.load_tools()
+        self.services = services
+        self.tools = self.services.load_tools()
         self.current_index = None
         self._is_updating = False
 
@@ -298,8 +297,8 @@ class ToolManagerWindow(tk.Toplevel):
         filepath = filedialog.askopenfilename(title="Импорт базы инструментов", filetypes=[("JSON Files", "*.json")])
         if filepath:
             try:
-                self.db.import_tools(filepath)
-                self.tools = self.db.load_tools()
+                self.services.import_tools(filepath)
+                self.tools = self.services.load_tools()
                 self.current_index = None
                 self._refresh_listbox()
                 messagebox.showinfo("Успех", "Инструменты успешно импортированы!")
@@ -309,13 +308,13 @@ class ToolManagerWindow(tk.Toplevel):
         filepath = filedialog.asksaveasfilename(title="Экспорт базы инструментов", defaultextension=".json", filetypes=[("JSON Files", "*.json")], initialfile="tools_backup.json")
         if filepath:
             try:
-                self.db.save_tools(self.tools)
-                self.db.export_tools(filepath)
+                self.services.save_tools(self.tools)
+                self.services.export_tools(filepath)
                 messagebox.showinfo("Успех", "База инструментов успешно экспортирована!")
             except Exception as e: messagebox.showerror("Ошибка", str(e))
 
     def _save_and_close(self):
         try:
-            self.db.save_tools(self.tools)
+            self.services.save_tools(self.tools)
             self.destroy()
         except Exception as e: messagebox.showerror("Ошибка", str(e))

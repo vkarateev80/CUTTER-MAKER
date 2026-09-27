@@ -5,7 +5,6 @@ from src.core.controller import AppController
 from src.core.service_client import ServiceClient
 from src.gui.ui_builder import UIBuilder
 from src.gui.canvas_manager import CanvasManager
-from src.db.db_manager import DatabaseManager
 
 class CamApp:
     def __init__(self, root: tk.Tk):
@@ -15,11 +14,10 @@ class CamApp:
 
         # 1. Инициализация Модели (Хранилище данных)
         self.project = ProjectState()
-        self.db = DatabaseManager()
         self.tools_list = []
         self.posts_list = []
 
-        # HTTP-клиент сервисов ingest/render с локальным fallback
+        # HTTP-клиент сервисов ingest/render/geometry/math/cam/state с локальным fallback
         self.services = ServiceClient()
 
         # 2. Инициализация Контроллера (Бизнес-логика)
@@ -57,8 +55,8 @@ class CamApp:
             self.ui.btn_cnc.config(text="⚙️ Сгенерировать УП")
 
     def refresh_comboboxes(self):
-        self.tools_list = self.db.load_tools()
-        self.posts_list = self.db.load_postprocessors()
+        self.tools_list = self.services.load_tools()
+        self.posts_list = self.services.load_postprocessors()
         
         self.ui.combo_tool['values'] = [t.name for t in self.tools_list]
         if self.tools_list: self.ui.combo_tool.current(0)
@@ -70,13 +68,13 @@ class CamApp:
 
     def open_tool_manager(self):
         from src.gui.tool_manager import ToolManagerWindow
-        win = ToolManagerWindow(self.root)
+        win = ToolManagerWindow(self.root, self.services)
         self.root.wait_window(win)
         self.refresh_comboboxes()
 
     def open_postprocessor_manager(self):
         from src.gui.postprocessor_manager import PostprocessorManagerWindow
-        win = PostprocessorManagerWindow(self.root)
+        win = PostprocessorManagerWindow(self.root, self.services)
         self.root.wait_window(win)
         self.refresh_comboboxes()
 

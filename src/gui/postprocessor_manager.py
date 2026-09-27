@@ -2,18 +2,17 @@ import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 from pathlib import Path
 from src.db.models import PostProcessor
-from src.db.db_manager import DatabaseManager
 
 class PostprocessorManagerWindow(tk.Toplevel):
-    def __init__(self, parent):
+    def __init__(self, parent, services):
         super().__init__(parent)
         self.title("Менеджер библиотеки постпроцессоров")
         self.geometry("800x550")
         self.transient(parent)
         self.grab_set()
         self.resizable(False, False)
-        self.db = DatabaseManager()
-        self.posts = self.db.load_postprocessors()
+        self.services = services
+        self.posts = self.services.load_postprocessors()
         self.current_index = None
         self._is_updating = False
 
@@ -171,8 +170,8 @@ class PostprocessorManagerWindow(tk.Toplevel):
         filepath = filedialog.askopenfilename(title="Импорт базы постпроцессоров", filetypes=[("JSON Files", "*.json")])
         if filepath:
             try:
-                self.db.import_postprocessors(filepath)
-                self.posts = self.db.load_postprocessors()
+                self.services.import_postprocessors(filepath)
+                self.posts = self.services.load_postprocessors()
                 self.current_index = None
                 self._refresh_listbox()
                 messagebox.showinfo("Успех", "Постпроцессоры успешно импортированы!")
@@ -182,13 +181,13 @@ class PostprocessorManagerWindow(tk.Toplevel):
         filepath = filedialog.asksaveasfilename(title="Экспорт базы постпроцессоров", defaultextension=".json", filetypes=[("JSON Files", "*.json")], initialfile="postprocessors_backup.json")
         if filepath:
             try:
-                self.db.save_postprocessors(self.posts)
-                self.db.export_postprocessors(filepath)
+                self.services.save_postprocessors(self.posts)
+                self.services.export_postprocessors(filepath)
                 messagebox.showinfo("Успех", "База постпроцессоров успешно экспортирована!")
             except Exception as e: messagebox.showerror("Ошибка", str(e))
 
     def _save_and_close(self):
         try:
-            self.db.save_postprocessors(self.posts)
+            self.services.save_postprocessors(self.posts)
             self.destroy()
         except Exception as e: messagebox.showerror("Ошибка", str(e))

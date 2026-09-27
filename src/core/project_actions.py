@@ -1,5 +1,4 @@
 """Миксин действий над проектом: создание/сохранение/загрузка, сброс, режимы, статистика дисторсии."""
-import json
 import shutil
 import tkinter as tk
 from pathlib import Path
@@ -37,8 +36,7 @@ class ProjectActions:
         data = self.project.to_dict(ui_data)
         
         try:
-            with open(state_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
+            self.app.services.save_project_doc(state_file, data)
             self.app.log("Проект успешно сохранен!")
             messagebox.showinfo("Успех", "Проект успешно сохранен!")
         except Exception as e:
@@ -52,8 +50,7 @@ class ProjectActions:
         self.project.current_project_dir = state_file.parent
         
         try:
-            with open(state_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            data = self.app.services.load_project_doc(state_file)
                 
             self.project.from_dict(data)
             
