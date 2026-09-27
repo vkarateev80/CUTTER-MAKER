@@ -1,6 +1,7 @@
 from pathlib import Path
 from shapely.geometry import LineString, Polygon, MultiPolygon, MultiLineString
 from shapely.ops import unary_union
+from shapely.strtree import STRtree
 import math
 import ezdxf 
 import subprocess 
@@ -105,11 +106,15 @@ class CamPipeline:
                 coords = list(line.coords)
                 is_closed = math.dist(coords[0], coords[-1]) < 1e-4
                 segments = [LineString([coords[k], coords[k+1]]) for k in range(len(coords)-1)]
-                for k in range(len(segments)):
-                    for m in range(k + 2, len(segments)): 
+                # STRtree отсекает заведомо далёкие сегменты: вместо O(n^2) пар — только кандидаты по bbox
+                seg_tree = STRtree(segments)
+                for k, seg in enumerate(segments):
+                    for m in seg_tree.query(seg):
+                        m = int(m)
+                        if m <= k + 1: continue
                         if is_closed and k == 0 and m == len(segments) - 1: continue
-                        if segments[k].intersects(segments[m]):
-                            inter = segments[k].intersection(segments[m])
+                        if seg.intersects(segments[m]):
+                            inter = seg.intersection(segments[m])
                             if inter.length > 0.01:
                                 stats["duplicates"] += 1
                                 stats["duplicate_nodes"].extend(extract_coords(inter))
@@ -117,16 +122,21 @@ class CamPipeline:
                                 stats["intersections"] += 1
                                 stats["intersection_nodes"].extend(extract_coords(inter))
 
-        for i in range(len(shapely_lines)):
-            for j in range(i + 1, len(shapely_lines)):
-                if shapely_lines[i].intersects(shapely_lines[j]):
-                    inter = shapely_lines[i].intersection(shapely_lines[j])
-                    if inter.length > 0.01:
-                        stats["duplicates"] += 1
-                        stats["duplicate_nodes"].extend(extract_coords(inter))
-                    else:
-                        stats["intersections"] += 1
-                        stats["intersection_nodes"].extend(extract_coords(inter))
+        # Попарные пересечения контуров: индекс по bbox вместо грубого O(n^2)
+        if len(shapely_lines) > 1:
+            tree = STRtree(shapely_lines)
+            for i, line in enumerate(shapely_lines):
+                for j in tree.query(line):
+                    j = int(j)
+                    if j <= i: continue
+                    if line.intersects(shapely_lines[j]):
+                        inter = line.intersection(shapely_lines[j])
+                        if inter.length > 0.01:
+                            stats["duplicates"] += 1
+                            stats["duplicate_nodes"].extend(extract_coords(inter))
+                        else:
+                            stats["intersections"] += 1
+                            stats["intersection_nodes"].extend(extract_coords(inter))
         return stats
 
     def step3_heal_and_optimize(self, paths: list[CamPath]) -> list[CamPath]:
