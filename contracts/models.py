@@ -8,6 +8,7 @@
 """
 
 import uuid
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,3 +55,76 @@ class PostProcessorDTO(BaseModel):
     tool_on: str = "M3 S{rpm}"
     tool_off: str = "M5"
     safe_z: float = 5.0
+
+
+# ============================================================
+# Фаза 2: асинхронные задачи (ingest / render services)
+# ============================================================
+
+class JobRefDTO(BaseModel):
+    """Ответ на принятую задачу: клиент опрашивает статус по job_id."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+
+
+class JobStatusDTO(BaseModel):
+    """Статус задачи при polling GET /v1/jobs/{id}."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    status: Literal["queued", "running", "done", "error"]
+    error: str | None = None
+    result: dict[str, Any] | None = None
+
+
+class ParseResultDTO(BaseModel):
+    """Результат ingest: распарсенный макет."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO]
+
+
+class UvMaskRequestDTO(BaseModel):
+    """Запрос render: генерация УФ-маски PDF (output_path — путь на хосте сервиса)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO]
+    offset: float
+    output_path: str
+    badge_text: str = ""
+    mark_d: float = 4.0
+    mark_margin: float = 10.0
+
+
+class UvMaskResultDTO(BaseModel):
+    """Результат УФ-маски: слои для холста + геометрия маски (WKT, как в project_state.json)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    visual_paths: list[CamPathDTO]
+    pure_paths: list[CamPathDTO]
+    mask_geom_wkt: str
+
+
+class ReportRequestDTO(BaseModel):
+    """Запрос render: технологическая карта (PDF) для оператора ЧПУ."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    project_name: str
+    stats: dict[str, str | float | int | bool]
+    paths: list[CamPathDTO]
+    output_path: str
+
+
+class ReportResultDTO(BaseModel):
+    """Результат техкарты: куда записан PDF."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    output_path: str

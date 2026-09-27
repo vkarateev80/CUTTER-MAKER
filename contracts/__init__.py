@@ -5,6 +5,28 @@
 GUI и сервисы могли импортировать контракты без связывания с доменом.
 """
 
-from contracts.models import CamPathDTO, PostProcessorDTO, ToolDTO
+from contracts.models import (
+    CamPathDTO,
+    JobRefDTO,
+    JobStatusDTO,
+    ParseResultDTO,
+    PostProcessorDTO,
+    ReportRequestDTO,
+    ReportResultDTO,
+    ToolDTO,
+    UvMaskRequestDTO,
+    UvMaskResultDTO,
+)
 
-__all__ = ["CamPathDTO", "ToolDTO", "PostProcessorDTO"]
+__all__ = [
+    "CamPathDTO",
+    "ToolDTO",
+    "PostProcessorDTO",
+    "JobRefDTO",
+    "JobStatusDTO",
+    "ParseResultDTO",
+    "UvMaskRequestDTO",
+    "UvMaskResultDTO",
+    "ReportRequestDTO",
+    "ReportResultDTO",
+]

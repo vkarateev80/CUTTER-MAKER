@@ -5,3 +5,8 @@ PyMuPDF>=1.23.26
 svgelements>=1.9.6
 scipy>=1.13.1
 pydantic>=2.6
+# Фаза 2: клиент сервисов (GUI) + сервисы ingest/render
+httpx>=0.27
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9

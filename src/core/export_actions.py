@@ -10,7 +10,6 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 from src.pipeline.cam_pipeline import CamPipeline
-from src.pipeline.report_generator import ReportGenerator
 
 
 class ExportActions:
@@ -65,7 +64,7 @@ class ExportActions:
         paths_for_mask = main_paths + crop_marks
         
         if not paths_for_mask: return messagebox.showwarning("Внимание", "Нет векторов для создания маски!")
-        self._run_async(CamPipeline().generate_uv_mask_pdf, self._on_export_uv_mask_done, paths_for_mask, offset, mask_file, final_badge_text, mark_d, mark_margin)
+        self._run_async(self.app.services.generate_uv_mask_pdf, self._on_export_uv_mask_done, paths_for_mask, offset, mask_file, final_badge_text, mark_d, mark_margin)
 
     def _on_export_uv_mask_done(self, result_paths):
         if result_paths:
@@ -218,7 +217,7 @@ class ExportActions:
         
         output_pdf = self.project.current_project_dir / "05_Техкарта.pdf"
 
-        self._run_async(ReportGenerator.generate, lambda res: self._on_generate_report_done(output_pdf), self.project.current_project_dir.name, stats, paths_to_draw, output_pdf)
+        self._run_async(self.app.services.generate_report, lambda res: self._on_generate_report_done(output_pdf), self.project.current_project_dir.name, stats, paths_to_draw, output_pdf)
 
     def _on_generate_report_done(self, output_pdf):
         self.app.log(f"Техкарта успешно сохранена: {output_pdf.name}")

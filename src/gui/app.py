@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox
 from src.core.project import ProjectState
 from src.core.controller import AppController
+from src.core.service_client import ServiceClient
 from src.gui.ui_builder import UIBuilder
 from src.gui.canvas_manager import CanvasManager
 from src.db.db_manager import DatabaseManager
@@ -10,13 +11,16 @@ class CamApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("CUTTER MAKER - Производство Гибких Штампов")
-        self.root.geometry("1400x900") 
-        
+        self.root.geometry("1400x900")
+
         # 1. Инициализация Модели (Хранилище данных)
         self.project = ProjectState()
         self.db = DatabaseManager()
         self.tools_list = []
         self.posts_list = []
+
+        # HTTP-клиент сервисов ingest/render с локальным fallback
+        self.services = ServiceClient()
 
         # 2. Инициализация Контроллера (Бизнес-логика)
         self.controller = AppController(self)

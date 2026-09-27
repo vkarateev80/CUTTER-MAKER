@@ -9,7 +9,7 @@ from src.pipeline.cam_pipeline import CamPipeline
 class PipelineActions:
     def do_step1(self):
         if not self.project.input_filepath: return messagebox.showwarning("Внимание", "Сначала СОЗДАЙТЕ ПРОЕКТ!")
-        self._run_async(CamPipeline().step1_parse, self._on_step1_done, self.project.input_filepath)
+        self._run_async(self.app.services.parse, self._on_step1_done, self.project.input_filepath)
 
     def _on_step1_done(self, raw_paths):
         if raw_paths:
