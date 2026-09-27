@@ -1,5 +1,6 @@
 # Среда разработки
 venv/
+.venv/
 __pycache__/
 .vscode/
 

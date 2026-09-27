@@ -1,9 +1,11 @@
 import sys
 import os
 from pathlib import Path
+from shapely.geometry import LineString, MultiLineString
 
 sys.path.insert(0, os.getcwd())
 from src.pipeline.cam_pipeline import CamPipeline
+from src.db.models import Tool, PostProcessor
 
 def create_mock_svg(filepath: Path):
     """Создает простой SVG-файл с одним кругом (через тег <path>)."""
@@ -24,9 +26,29 @@ def main():
     print("Создаем тестовый SVG-файл...")
     create_mock_svg(input_svg)
     
-    # Запускаем конвейер. Он сам должен понять, что это SVG и вызвать SvgParser!
+    # Конвейер: парсинг -> лечение -> геометрия маски -> G-код
     pipeline = CamPipeline()
-    pipeline.process_file_to_gcode(input_svg, output_gcode)
+    paths = pipeline.step1_parse(input_svg)
+    assert paths, "Парсер SVG не вернул ни одного контура!"
+    print(f"Шаг 1: SVG распарсен, контуров: {len(paths)}")
+
+    healed = pipeline.step3_heal_and_optimize(paths)
+    assert healed, "Лечение геометрии не вернуло контуров!"
+    print(f"Шаг 2: Геометрия вылечена, контуров: {len(healed)}")
+
+    # Собираем геометрию маски (эквидистанта), как это делает generate_uv_mask_pdf
+    lines = [LineString(p.points) for p in healed if len(p.points) > 1]
+    mask_geom = MultiLineString(lines).buffer(0.05, cap_style=2, join_style=2, mitre_limit=50.0)
+    assert not mask_geom.is_empty, "Геометрия маски пуста!"
+
+    tool = Tool(name="Тестовая V-фреза")
+    post = PostProcessor(name="Тестовый пост")
+    ideal_paths, cnc_paths, time_min = pipeline.generate_gcode(
+        mask_geom, output_gcode, tool, post, mask_offset=0.05, enable_sharpening=False
+    )
+    assert output_gcode.exists(), "Файл G-кода не создан!"
+    assert "G1" in output_gcode.read_text(encoding="utf-8"), "В G-коде нет рабочих перемещений!"
+    print(f"Шаг 3: G-код готов: {output_gcode} (контуров ЧПУ: {len(cnc_paths)}, время: {time_min:.2f} мин)")
 
 if __name__ == "__main__":
     main()
