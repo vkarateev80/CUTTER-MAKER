@@ -44,7 +44,9 @@ class AppController(ProjectActions, PipelineActions, TransformActions, ExportAct
                 err = e
             finally:
                 sys.stdout = old_stdout
-            self.app.root.after(0, self._on_async_done, callback, res, err)
+            # ВАЖНО: прямой root.after из фонового потока на Tk 9 (macOS)
+            # молча теряет callback → вечная "загрузка". Только через очередь UI.
+            self.app.post_to_ui(self._on_async_done, callback, res, err)
 
         threading.Thread(target=worker, daemon=True).start()
 

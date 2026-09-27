@@ -1,3 +1,4 @@
+import queue
 import tkinter as tk
 from tkinter import messagebox
 from src.core.project import ProjectState
@@ -11,6 +12,13 @@ class CamApp:
         self.root = root
         self.root.title("CUTTER MAKER - Производство Гибких Штампов")
         self.root.geometry("1400x900")
+
+        # Потокобезопасная доставка callback'ов в главный Tk-поток.
+        # НА ТОМ ЖЕ Tk (macOS, Tcl/Tk 9) прямой root.after из фонового потока
+        # МОЛЧА теряет callback — воркеры therefore кладут в очередь, а поллер,
+        # запланированный ИЗ главного потока, исполняет.
+        self._ui_queue: queue.Queue = queue.Queue()
+        self.root.after(50, self._drain_ui_queue)
 
         # 1. Инициализация Модели (Хранилище данных)
         self.project = ProjectState()
@@ -78,6 +86,24 @@ class CamApp:
         self.root.wait_window(win)
         self.refresh_comboboxes()
 
+    def post_to_ui(self, fn, *args):
+        """Исполнить fn(*args) в главном Tk-потоке (потокобезопасно из любого потока)."""
+        self._ui_queue.put((fn, args))
+
+    def _drain_ui_queue(self):
+        while True:
+            try:
+                fn, args = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                fn(*args)
+            except Exception as e:
+                # Исключение в одном callback не должно убивать поллер очереди
+                import sys
+                print(f"[UI] Ошибка callback: {e}", file=sys.stderr)
+        self.root.after(50, self._drain_ui_queue)
+
     def log(self, message: str):
         def append():
             self.ui.text_log.config(state=tk.NORMAL)
@@ -85,7 +111,7 @@ class CamApp:
             self.ui.text_log.see(tk.END)
             self.ui.text_log.config(state=tk.DISABLED)
             self.root.update_idletasks()
-        self.root.after(0, append)
+        self.post_to_ui(append)
 
     def clear_logs(self):
         self.ui.text_log.config(state=tk.NORMAL)
