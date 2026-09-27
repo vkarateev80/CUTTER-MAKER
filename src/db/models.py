@@ -1,6 +1,8 @@
 import uuid
 from dataclasses import dataclass, field, asdict
 
+from contracts import PostProcessorDTO, ToolDTO
+
 @dataclass
 class Tool:
     """
@@ -17,15 +19,20 @@ class Tool:
     feedrate: int = 1500
     spindle_speed: int = 1000
 
+    def to_dto(self) -> ToolDTO:
+        return ToolDTO.model_validate(asdict(self))
+
+    @classmethod
+    def from_dto(cls, dto: ToolDTO) -> 'Tool':
+        return cls(**dto.model_dump())
+
     def to_dict(self) -> dict:
-        return asdict(self)
+        return self.to_dto().model_dump()
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Tool':
-        # Игнорируем неизвестные ключи (полезно для совместимости будущих версий)
-        valid_keys = cls.__dataclass_fields__.keys()
-        filtered_data = {k: v for k, v in data.items() if k in valid_keys}
-        return cls(**filtered_data)
+        # Неизвестные ключи игнорируются на стороне контракта (extra="ignore")
+        return cls.from_dto(ToolDTO.model_validate(data))
 
 @dataclass
 class PostProcessor:
@@ -42,11 +49,16 @@ class PostProcessor:
     tool_off: str = "M5"
     safe_z: float = 5.0
 
+    def to_dto(self) -> PostProcessorDTO:
+        return PostProcessorDTO.model_validate(asdict(self))
+
+    @classmethod
+    def from_dto(cls, dto: PostProcessorDTO) -> 'PostProcessor':
+        return cls(**dto.model_dump())
+
     def to_dict(self) -> dict:
-        return asdict(self)
+        return self.to_dto().model_dump()
 
     @classmethod
     def from_dict(cls, data: dict) -> 'PostProcessor':
-        valid_keys = cls.__dataclass_fields__.keys()
-        filtered_data = {k: v for k, v in data.items() if k in valid_keys}
-        return cls(**filtered_data)
+        return cls.from_dto(PostProcessorDTO.model_validate(data))
