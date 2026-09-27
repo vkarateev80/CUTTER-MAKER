@@ -2,7 +2,6 @@
 import tkinter as tk
 from tkinter import messagebox
 
-from src.optimizer.pattern_recognition import PatternRecognizer
 from src.pipeline.cam_pipeline import CamPipeline
 
 
@@ -34,13 +33,13 @@ class PipelineActions:
             self.update_distortion_stats()
             
             self.app.log("Авто-анализ макета на наличие массива...")
-            self._run_async(PatternRecognizer(tolerance=0.5).analyze, self._on_analyze_array_done, self.project.raw_paths)
+            self._run_async(self.app.services.analyze_pattern, self._on_analyze_array_done, self.project.raw_paths)
 
     def do_analyze_array(self):
         paths = self.project.raw_paths
         if not paths: return messagebox.showwarning("Внимание", "Нет векторов для анализа! Сначала выполните ШАГ 1.")
         self.app.log("Запуск анализа массивов и межэтикеточных зазоров...")
-        self._run_async(PatternRecognizer(tolerance=0.5).analyze, self._on_analyze_array_done, paths)
+        self._run_async(self.app.services.analyze_pattern, self._on_analyze_array_done, paths)
 
     def _on_analyze_array_done(self, result):
         if result and result.get("is_array"):
@@ -168,7 +167,7 @@ class PipelineActions:
             
             dialog.destroy()
             self.app.log("Генерация сетки массива...")
-            self._run_async(CamPipeline().multiply_paths, self._on_generate_array_done, self.project.master_raw_paths, self.project.array_offsets)
+            self._run_async(self.app.services.multiply_paths, self._on_generate_array_done, self.project.master_raw_paths, self.project.array_offsets)
 
         btn_gen = tk.Button(frame, text="✅ Применить", bg="#4CAF50", fg="white", font=("Arial", 9, "bold"), command=on_generate)
         btn_gen.grid(row=6, column=0, columnspan=3, pady=(15, 0), sticky=tk.EW)
@@ -199,7 +198,7 @@ class PipelineActions:
         if not paths: return messagebox.showwarning("Внимание", "Сначала выполните ШАГ 1!")
         try: loop_area = float(self.ui.entry_loop_area.get())
         except: return messagebox.showerror("Ошибка", "Неверный формат чисел!")
-        def task(): return CamPipeline(min_loop_area=loop_area).step2_check_errors(paths)
+        def task(): return self.app.services.check_errors(paths, loop_area)
         self._run_async(task, self._on_step2_done)
 
     def _on_step2_done(self, stats):
@@ -215,12 +214,11 @@ class PipelineActions:
         except: return messagebox.showerror("Ошибка", "Неверный формат чисел!")
         
         def task(master_paths, offsets, t, a, proj_dir):
-            pipeline = CamPipeline(tolerance=t, min_loop_area=a)
-            healed_master = pipeline.step3_heal_and_optimize(master_paths)
-            array_paths = pipeline.multiply_paths(healed_master, offsets) if offsets else []
+            healed_master = self.app.services.heal(master_paths, t, a)
+            array_paths = self.app.services.multiply_paths(healed_master, offsets) if offsets else []
             final_geom = array_paths if array_paths else healed_master
             if final_geom and proj_dir:
-                pipeline.save_source_dxf(final_geom, proj_dir / "02_Вылеченный_Мастер.dxf")
+                CamPipeline().save_source_dxf(final_geom, proj_dir / "02_Вылеченный_Мастер.dxf")
             return healed_master, array_paths
             
         self._run_async(task, self._on_step3_done, self.project.master_raw_paths, self.project.array_offsets, tol, loop_area, self.project.current_project_dir)

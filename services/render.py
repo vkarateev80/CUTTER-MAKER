@@ -11,16 +11,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 
 from contracts import (
     JobRefDTO,
-    JobStatusDTO,
     ReportRequestDTO,
     ReportResultDTO,
     UvMaskRequestDTO,
     UvMaskResultDTO,
 )
+from services.common import add_common_routes
 from services.jobstore import JobStore
 from src.parser.geometry import CamPath
 from src.pipeline.cam_pipeline import CamPipeline
@@ -28,11 +28,7 @@ from src.pipeline.report_generator import ReportGenerator
 
 app = FastAPI(title="CUTTER MAKER — render", version="1.0")
 store = JobStore()
-
-
-@app.get("/health")
-def health() -> dict:
-    return {"ok": True, "service": "render"}
+add_common_routes(app, store, "render")
 
 
 @app.post("/v1/uv-mask", response_model=JobRefDTO)
@@ -65,14 +61,6 @@ def report(req: ReportRequestDTO) -> JobRefDTO:
         return ReportResultDTO(output_path=str(output_path)).model_dump()
 
     return JobRefDTO(job_id=store.submit(worker))
-
-
-@app.get("/v1/jobs/{job_id}", response_model=JobStatusDTO)
-def job_status(job_id: str) -> JobStatusDTO:
-    status = store.get(job_id)
-    if status is None:
-        raise HTTPException(status_code=404, detail="Задача не найдена")
-    return status
 
 
 if __name__ == "__main__":

@@ -128,3 +128,140 @@ class ReportResultDTO(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     output_path: str
+
+
+# ============================================================
+# Фаза 3: сервисы geometry / math / cam
+# ============================================================
+
+class PathsResultDTO(BaseModel):
+    """Универсальный результат: список контуров."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO] = Field(default_factory=list)
+
+
+class CheckErrorsRequestDTO(BaseModel):
+    """geometry: проверка геометрии на ошибки (ШАГ 2)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO]
+    min_loop_area: float = 0.0
+
+
+class CheckErrorsResultDTO(BaseModel):
+    """Счётчики и узлы ошибок — ключи совпадают со stats из step2_check_errors."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    open_paths: int = 0
+    empty_paths: int = 0
+    intersections: int = 0
+    duplicates: int = 0
+    dust: int = 0
+    error_nodes: list[Point] = Field(default_factory=list)
+    intersection_nodes: list[Point] = Field(default_factory=list)
+    duplicate_nodes: list[Point] = Field(default_factory=list)
+    dust_nodes: list[Point] = Field(default_factory=list)
+
+
+class HealRequestDTO(BaseModel):
+    """geometry: морфологическое лечение (ШАГ 3)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO]
+    tolerance: float = 0.01
+    min_loop_area: float = 0.0
+
+
+class PatternRequestDTO(BaseModel):
+    """math: распознавание массива (Master-штамп)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO]
+    tolerance: float = 0.5
+
+
+class PatternResultDTO(BaseModel):
+    """Результат PatternRecognizer — поля с дефолтами = формат _empty_result."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    is_array: bool = False
+    count: int = 0
+    rows: int = 0
+    cols: int = 0
+    step_x: float = 0.0
+    step_y: float = 0.0
+    gap_x: float = 0.0
+    gap_y: float = 0.0
+    master_paths: list[CamPathDTO] = Field(default_factory=list)
+    offsets: list[Point] = Field(default_factory=list)
+
+
+class MultiplyRequestDTO(BaseModel):
+    """math: размножение мастер-штампа по смещениям (Step & Repeat)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO]
+    offsets: list[tuple[float, float]] = Field(default_factory=list)
+
+
+class DistortionRequestDTO(BaseModel):
+    """math: сжатие макета под магнитный вал (дисторсия)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO]
+    factor: float
+    axis: str = "Y"
+
+
+class RotateRequestDTO(BaseModel):
+    """math: поворот геометрии вокруг центра."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO]
+    angle_deg: float = 90.0
+
+
+class CropMarksRequestDTO(BaseModel):
+    """math: генерация обрезных меток по рапорту."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    paths: list[CamPathDTO]
+    rapport: float
+    width: float
+    axis: str = "Y"
+
+
+class GcodeRequestDTO(BaseModel):
+    """cam: генерация УП из геометрии маски (output_path — путь на хосте сервиса)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    mask_geom_wkt: str
+    output_path: str
+    tool: ToolDTO
+    post: PostProcessorDTO
+    mask_offset: float
+    enable_sharpening: bool = False
+    lead_radius: float = 0.0
+    milling_dir: str = "Climb"
+
+
+class GcodeResultDTO(BaseModel):
+    """cam: слои идеального лезвия/ЧПУ и расчётное время фрезеровки."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    ideal_paths: list[CamPathDTO] = Field(default_factory=list)
+    cnc_paths: list[CamPathDTO] = Field(default_factory=list)
+    time_min: float = 0.0

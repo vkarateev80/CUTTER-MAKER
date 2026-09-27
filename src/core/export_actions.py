@@ -163,7 +163,7 @@ class ExportActions:
         milling_dir_raw = self.ui.var_milling_dir.get()
         milling_dir = "Conventional" if "Conventional" in milling_dir_raw else "Climb"
         
-        self._run_async(CamPipeline().generate_gcode, lambda res: self._on_export_cnc_done(res, cnc_file), self.project.mask_geom, cnc_file, selected_tool, selected_post, offset, sharpen, lead_radius, milling_dir)
+        self._run_async(self.app.services.generate_gcode, lambda res: self._on_export_cnc_done(res, cnc_file), self.project.mask_geom, cnc_file, selected_tool, selected_post, offset, sharpen, lead_radius, milling_dir)
 
     def _on_export_cnc_done(self, result_data, cnc_file):
         if result_data:
@@ -240,7 +240,7 @@ class ExportActions:
             
             subprocess.run([str(inkscape_exe), str(safe_svg)])
             print("Inkscape закрыт. Чтение изменений...")
-            new_paths = pipeline.step1_parse(safe_svg)
+            new_paths = self.app.services.parse(safe_svg)
             if safe_svg.exists():
                 try: safe_svg.unlink()
                 except: pass

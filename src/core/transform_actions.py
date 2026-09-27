@@ -1,8 +1,6 @@
 """Миксин трансформаций геометрии: дисторсия, поворот 90°, обрезные метки."""
 from tkinter import messagebox
 
-from src.pipeline.cam_pipeline import CamPipeline
-
 
 class TransformActions:
     def do_apply_distortion(self):
@@ -22,7 +20,7 @@ class TransformActions:
         axis = self.ui.var_dist_axis.get()
         base_paths = [p for p in paths if p.layer_name != "CROP_MARKS"]
         
-        self._run_async(CamPipeline().apply_distortion, lambda res: self._on_apply_distortion_done(res, axis), base_paths, self.project.current_dist_factor, axis)
+        self._run_async(self.app.services.apply_distortion, lambda res: self._on_apply_distortion_done(res, axis), base_paths, self.project.current_dist_factor, axis)
 
     def _on_apply_distortion_done(self, new_paths, axis):
         if new_paths:
@@ -44,11 +42,11 @@ class TransformActions:
 
     def do_rotate_90(self):
         def task(raw, ready, dist, array):
-            pipeline = CamPipeline()
-            res_raw = pipeline.rotate_geometry(raw, 90.0) if raw else []
-            res_ready = pipeline.rotate_geometry(ready, 90.0) if ready else []
-            res_dist = pipeline.rotate_geometry(dist, 90.0) if dist else []
-            res_array = pipeline.rotate_geometry(array, 90.0) if array else []
+            rotate = self.app.services.rotate_geometry
+            res_raw = rotate(raw, 90.0) if raw else []
+            res_ready = rotate(ready, 90.0) if ready else []
+            res_dist = rotate(dist, 90.0) if dist else []
+            res_array = rotate(array, 90.0) if array else []
             return res_raw, res_ready, res_dist, res_array
         self._run_async(task, self._on_rotate_90_done, self.project.raw_paths, self.project.layers.get("healed", []), self.project.distorted_paths, self.project.layers.get("array", []))
 
@@ -94,7 +92,7 @@ class TransformActions:
         total_width = actual_width + (2.0 * margin)
         self.app.log(f"Авто-расчет меток: Габарит {actual_width:.2f}мм + Отступы {margin*2}мм = Ширина {total_width:.2f}мм")
         
-        self._run_async(CamPipeline().add_crop_marks, self._on_add_crop_marks_done, paths, self.project.current_rapport, total_width, axis)
+        self._run_async(self.app.services.add_crop_marks, self._on_add_crop_marks_done, paths, self.project.current_rapport, total_width, axis)
 
     def _on_add_crop_marks_done(self, new_paths):
         if new_paths:
