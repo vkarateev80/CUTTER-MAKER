@@ -56,22 +56,9 @@ class AiParser(BaseParser):
         return []
 
     def _double_bridge(self) -> list[CamPath]:
-        if getattr(sys, 'frozen', False):
-            project_root = Path(sys.executable).parent
-        else:
-            project_root = Path(os.getcwd())
-        
-        if os.name == 'nt':
-            gs_exe = project_root / 'ghostscript_engine' / 'gs10.07.1' / 'bin' / 'gswin64c.exe'
-            if not gs_exe.exists():
-                gs_exe = project_root / 'ghostscript_engine' / 'gs10.07.1' / 'bin' / 'gswin32c.exe'
-            inkscape_exe = project_root / 'inkscape_engine' / 'bin' / 'inkscape.exe'
-        else:
-            gs_exe = Path('gs')
-            inkscape_exe = Path('inkscape')
-            
-        if os.name == 'nt' and (not gs_exe.exists() or not inkscape_exe.exists()):
-            raise RuntimeError("Не найдены локальные движки Ghostscript или Inkscape.")
+        from src.parser.engines import require_gs, require_inkscape
+        gs_exe = require_gs()
+        inkscape_exe = require_inkscape()
 
         temp_dir = Path(tempfile.gettempdir())
         

@@ -1,28 +1,17 @@
 import subprocess
 import tempfile
 import os
-import sys
 import shutil # <--- ДОБАВЛЕНО ДЛЯ КОПИРОВАНИЯ
 from pathlib import Path
 
 from src.parser.base_parser import BaseParser
+from src.parser.engines import require_inkscape
 from src.parser.geometry import CamPath
 from src.parser.svg_parser import SvgParser
 
 class InkscapeParser(BaseParser):
     def parse(self) -> list[CamPath]:
-        if getattr(sys, 'frozen', False):
-            project_root = Path(sys.executable).parent
-        else:
-            project_root = Path(os.getcwd())
-        
-        if os.name == 'nt':
-            inkscape_exe = project_root / 'inkscape_engine' / 'bin' / 'inkscape.exe'
-        else:
-            inkscape_exe = Path('inkscape') 
-
-        if os.name == 'nt' and not inkscape_exe.exists():
-            raise RuntimeError("Не найден исполняемый файл Inkscape!")
+        inkscape_exe = require_inkscape()
 
         temp_dir = Path(tempfile.gettempdir())
         

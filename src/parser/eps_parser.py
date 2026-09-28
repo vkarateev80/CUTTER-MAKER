@@ -1,33 +1,19 @@
 import subprocess
 import tempfile
 import os
-import sys
 import shutil
 from pathlib import Path
 
 from src.parser.base_parser import BaseParser
+from src.parser.engines import require_gs, resolve_inkscape
 from src.parser.geometry import CamPath
 from src.parser.svg_parser import SvgParser
 from src.parser.pdf_parser import PdfParser
 
 class EpsParser(BaseParser):
     def parse(self) -> list[CamPath]:
-        if getattr(sys, 'frozen', False):
-            project_root = Path(sys.executable).parent
-        else:
-            project_root = Path(os.getcwd())
-        
-        if os.name == 'nt':
-            gs_exe = project_root / 'ghostscript_engine' / 'gs10.07.1' / 'bin' / 'gswin64c.exe'
-            if not gs_exe.exists():
-                gs_exe = project_root / 'ghostscript_engine' / 'gs10.07.1' / 'bin' / 'gswin32c.exe'
-            inkscape_exe = project_root / 'inkscape_engine' / 'bin' / 'inkscape.exe'
-        else:
-            gs_exe = Path('gs')
-            inkscape_exe = Path('inkscape') 
-
-        if os.name == 'nt' and not gs_exe.exists():
-            raise RuntimeError("Не найден исполняемый файл Ghostscript!")
+        gs_exe = require_gs()
+        inkscape_exe = resolve_inkscape()
 
         temp_dir = Path(tempfile.gettempdir())
         
@@ -47,8 +33,8 @@ class EpsParser(BaseParser):
             ]
             subprocess.run(cmd_gs, check=True, capture_output=True, text=True, creationflags=cflags)
             
-            # 2. PDF -> SVG
-            if os.name != 'nt' or inkscape_exe.exists():
+            # 2. PDF -> SVG (нет Inkscape — читаем промежуточный PDF напрямую)
+            if inkscape_exe is not None:
                 cmd_ink = [
                     str(inkscape_exe), str(safe_pdf),
                     '--export-type=svg', '--export-text-to-path', '-o', str(safe_svg)

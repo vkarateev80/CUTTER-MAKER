@@ -5,6 +5,7 @@ import subprocess
 import shutil
 import datetime
 from pathlib import Path
+from src.parser.engines import require_inkscape
 from src.parser.geometry import CamPath
 
 class ReportGenerator:
@@ -124,9 +125,8 @@ class ReportGenerator:
         with open(safe_svg, "w", encoding="utf-8") as f:
             f.write("\n".join(svg))
             
-        project_root = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(os.getcwd())
-        inkscape_exe = project_root / 'inkscape_engine' / 'bin' / 'inkscape.exe' if os.name == 'nt' else Path('inkscape')
-        
+        inkscape_exe = require_inkscape()
+
         cflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         subprocess.run([str(inkscape_exe), str(safe_svg), '--export-text-to-path', f'--export-filename={output_path}'], check=True, capture_output=True, creationflags=cflags)
         

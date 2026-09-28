@@ -17,6 +17,7 @@ from src.parser.pdf_parser import PdfParser
 from src.parser.eps_parser import EpsParser
 from src.parser.inkscape_parser import InkscapeParser
 from src.parser.ai_parser import AiParser
+from src.parser.engines import require_inkscape
 
 from src.healer.morphology import MorphologicalHealer
 from src.optimizer.topology import TopologicalOptimizer
@@ -322,8 +323,7 @@ class CamPipeline:
         safe_pdf = temp_dir / f"cam_mask_out_{os.getpid()}.pdf"
         with open(safe_svg, "w", encoding="utf-8") as f: f.write("\n".join(svg_content))
             
-        project_root = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(os.getcwd())
-        inkscape_exe = project_root / 'inkscape_engine' / 'bin' / 'inkscape.exe' if os.name == 'nt' else Path('inkscape')
+        inkscape_exe = require_inkscape()
         cflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         subprocess.run([str(inkscape_exe), str(safe_svg), '--export-text-to-path', f'--export-filename={safe_pdf}'], check=True, capture_output=True, creationflags=cflags)
         
