@@ -43,10 +43,21 @@ class ProjectActions:
             messagebox.showerror("Ошибка сохранения", str(e))
 
     def load_project(self):
-        filepath = filedialog.askopenfilename(title="Выберите файл проекта", filetypes=[("JSON Файлы проекта", "project_state.json")])
+        filepath = filedialog.askopenfilename(
+            title="Выберите файл проекта",
+            filetypes=[("Документ проекта", "project_state.json"), ("JSON", "*.json")],
+        )
         if not filepath: return
-            
+
         state_file = Path(filepath)
+        # Фильтр диалога на macOS ненадёжен — отдельная защита от выбора макета
+        if state_file.name != "project_state.json":
+            messagebox.showerror(
+                "Не файл проекта",
+                f"Документ проекта называется project_state.json, а выбрано «{state_file.name}».\n"
+                "Если это макет — нажмите «НОВЫЙ ПРОЕКТ (ИЗ МАКЕТА)».",
+            )
+            return
         self.project.current_project_dir = state_file.parent
         
         try:

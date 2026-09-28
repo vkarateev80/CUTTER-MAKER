@@ -485,8 +485,19 @@ class ServiceClient:
             if e.response.status_code == 404:
                 # Сервис жив, файла нет — как и локальный open() бросил бы FileNotFoundError
                 raise FileNotFoundError(f"Файл проекта не найден: {path}")
-            raise
+            # Остальные 4xx/500: показываем detail сервиса, а не сухой httpx-текст
+            try:
+                detail = e.response.json().get("detail")
+            except Exception:
+                detail = None
+            raise RuntimeError(str(detail) if detail else str(e)) from e
         if result is not None:
             return StateDocDTO.model_validate(result).data
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except UnicodeDecodeError as e:
+            raise RuntimeError(
+                f"«{Path(path).name}» не UTF-8 JSON — это не документ проекта (нужен project_state.json). "
+                "Если это макет — нажмите «НОВЫЙ ПРОЕКТ (ИЗ МАКЕТА)»."
+            ) from e

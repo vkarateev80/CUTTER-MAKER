@@ -98,7 +98,16 @@ def project_load(req: StatePathDTO) -> StateDocDTO:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
+    except UnicodeDecodeError:
+        # Выбран не-JSON (например .cdr/.ai): раньше падал голый 500 с traceback
+        raise HTTPException(
+            status_code=415,
+            detail=f"«{path.name}» не UTF-8 JSON — это не документ проекта (нужен project_state.json). "
+                   "Если это макет — нажмите «НОВЫЙ ПРОЕКТ (ИЗ МАКЕТА)».",
+        )
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"«{path.name}» не является JSON: {e}")
+    except OSError as e:
         raise HTTPException(status_code=500, detail=f"Не удалось прочитать {path}: {e}")
     return StateDocDTO(path=str(path), data=data)
 
