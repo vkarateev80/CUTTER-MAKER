@@ -63,7 +63,11 @@ class UIBuilder:
         self.frame_left = tk.Frame(self.left_canvas)
         
         self.frame_left.bind("<Configure>", lambda e: self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all")))
-        self.left_canvas.create_window((0, 0), window=self.frame_left, anchor="nw")
+        self._left_win = self.left_canvas.create_window((0, 0), window=self.frame_left, anchor="nw")
+        # frame_left должен быть ровно шириной canvas: иначе самая широкая
+        # строка (4 кнопки в секции 3) распирает его шире canvas, правый край
+        # секций уходит под обрез (горизонтального скролла нет).
+        self.left_canvas.bind("<Configure>", lambda e: self.left_canvas.itemconfigure(self._left_win, width=e.width))
         self.left_canvas.configure(yscrollcommand=self.left_scrollbar.set)
         
         self.left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -216,13 +220,15 @@ class UIBuilder:
         tk.Label(frame_cnc_tools, text="Инструмент:", bg="#f9f9f9", font=("Arial", 9)).grid(row=0, column=0, sticky=tk.W, pady=2)
         self.combo_tool = ttk.Combobox(frame_cnc_tools, state="readonly", width=18)
         self.combo_tool.grid(row=0, column=1, padx=5, pady=2)
-        Button(frame_cnc_tools, text="⚙️", command=self.app.open_tool_manager).grid(row=0, column=2, padx=2)
+        # width=3: без него ttk-метрика эмодзи «⚙️» даёт req=115px и блок
+        # ЧПУ вылезает за пределы frame_left (430px) поверх правой панели.
+        Button(frame_cnc_tools, text="⚙️", width=3, command=self.app.open_tool_manager).grid(row=0, column=2, padx=2)
 
         tk.Label(frame_cnc_tools, text="Постпроцессор:", bg="#f9f9f9", font=("Arial", 9)).grid(row=1, column=0, sticky=tk.W, pady=2)
         self.combo_post = ttk.Combobox(frame_cnc_tools, state="readonly", width=18)
         self.combo_post.grid(row=1, column=1, padx=5, pady=2)
         self.combo_post.bind("<<ComboboxSelected>>", self.app._update_cnc_btn_text)
-        Button(frame_cnc_tools, text="⚙️", command=self.app.open_postprocessor_manager).grid(row=1, column=2, padx=2)
+        Button(frame_cnc_tools, text="⚙️", width=3, command=self.app.open_postprocessor_manager).grid(row=1, column=2, padx=2)
 
         tk.Checkbutton(frame_cnc_tools, text="🔪 3D-Подрезка углов", bg="#f9f9f9", fg="#FF4500", font=("Arial", 9, "bold"), variable=self.enable_sharpening).grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(5,0))
         

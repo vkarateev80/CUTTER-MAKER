@@ -11,7 +11,13 @@ class CamApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("CUTTER MAKER - Производство Гибких Штампов")
-        self.root.geometry("1400x900")
+        # Окно не шире/выше экрана и строго внутри него: на экране 1470pt
+        # geometry "1400x900" без позиции macOS сдвигал вправо → правый край
+        # (слои, статус-бар) уезжал за границу на ~180pt.
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        w, h = min(1400, sw - 20), min(900, sh - 40)
+        x, y = max(0, (sw - w) // 2), max(0, (sh - h) // 2)
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
 
         # Потокобезопасная доставка callback'ов в главный Tk-поток.
         # НА ТОМ ЖЕ Tk (macOS, Tcl/Tk 9) прямой root.after из фонового потока
