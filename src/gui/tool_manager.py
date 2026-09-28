@@ -3,6 +3,7 @@ from tkinter import messagebox, filedialog, ttk
 import math
 from pathlib import Path
 from src.db.models import Tool
+from src.gui.widgets import Button
 
 class FeedsSpeedsCalculator(tk.Toplevel):
     def __init__(self, parent, angle: float, tip: float, depth: float):
@@ -73,8 +74,8 @@ class FeedsSpeedsCalculator(tk.Toplevel):
 
         btn_frame = tk.Frame(self)
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10, padx=10)
-        tk.Button(btn_frame, text="✅ Применить", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), command=self._apply).pack(side=tk.RIGHT, padx=(5, 0))
-        tk.Button(btn_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
+        Button(btn_frame, text="✅ Применить", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), command=self._apply).pack(side=tk.RIGHT, padx=(5, 0))
+        Button(btn_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
 
     def _calculate(self, *args):
         try:
@@ -157,13 +158,13 @@ class ToolManagerWindow(tk.Toplevel):
 
         btn_frame = tk.Frame(frame_left, bg="#f0f0f0")
         btn_frame.pack(fill=tk.X, pady=5)
-        tk.Button(btn_frame, text="➕ Добавить", bg="#4CAF50", fg="white", command=self._add_tool).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
-        tk.Button(btn_frame, text="🗑 Удалить", bg="#f44336", fg="white", command=self._delete_tool).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+        Button(btn_frame, text="➕ Добавить", bg="#4CAF50", fg="white", command=self._add_tool).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        Button(btn_frame, text="🗑 Удалить", bg="#f44336", fg="white", command=self._delete_tool).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
 
         io_frame = tk.Frame(frame_left, bg="#f0f0f0")
         io_frame.pack(fill=tk.X, pady=5)
-        tk.Button(io_frame, text="📥 Импорт", command=self._import_db).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
-        tk.Button(io_frame, text="📤 Экспорт", command=self._export_db).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+        Button(io_frame, text="📥 Импорт", command=self._import_db).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        Button(io_frame, text="📤 Экспорт", command=self._export_db).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
 
         self.frame_right = tk.LabelFrame(self, text="Параметры инструмента", padx=15, pady=15, font=("Arial", 10, "bold"))
         self.frame_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -195,13 +196,13 @@ class ToolManagerWindow(tk.Toplevel):
         tk.Entry(grid_frame, textvariable=self.var_spindle, width=10).grid(row=4, column=3, sticky=tk.W, pady=5, padx=5)
 
         # Кнопка вызова калькулятора
-        btn_calc = tk.Button(grid_frame, text="🧮 Авто-расчет режимов (Калькулятор)", bg="#FFD700", font=("Arial", 9, "bold"), command=self._open_calculator)
+        btn_calc = Button(grid_frame, text="🧮 Авто-расчет режимов (Калькулятор)", bg="#FFD700", font=("Arial", 9, "bold"), command=self._open_calculator)
         btn_calc.grid(row=5, column=0, columnspan=4, sticky=tk.EW, pady=(15, 5), padx=5)
 
         bot_frame = tk.Frame(self.frame_right)
         bot_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
-        tk.Button(bot_frame, text="💾 Сохранить и Закрыть", bg="#2196F3", fg="white", font=("Arial", 10, "bold"), command=self._save_and_close).pack(side=tk.RIGHT, padx=(5, 0))
-        tk.Button(bot_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
+        Button(bot_frame, text="💾 Сохранить и Закрыть", bg="#2196F3", fg="white", font=("Arial", 10, "bold"), command=self._save_and_close).pack(side=tk.RIGHT, padx=(5, 0))
+        Button(bot_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
         self._toggle_form_state(tk.DISABLED)
 
     def _open_calculator(self):

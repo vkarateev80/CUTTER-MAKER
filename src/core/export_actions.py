@@ -10,6 +10,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 from src.pipeline.cam_pipeline import CamPipeline
+from src.gui.widgets import Button
 
 
 class ExportActions:
@@ -46,8 +47,8 @@ class ExportActions:
 
         btn_frame = tk.Frame(dialog)
         btn_frame.pack(pady=10)
-        tk.Button(btn_frame, text="✅ Сгенерировать PDF", width=20, bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), command=on_ok).pack(side=tk.LEFT, padx=10)
-        tk.Button(btn_frame, text="❌ Отмена", width=10, bg="#f44336", fg="white", font=("Arial", 10, "bold"), command=on_cancel).pack(side=tk.LEFT, padx=10)
+        Button(btn_frame, text="✅ Сгенерировать PDF", width=20, bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), command=on_ok).pack(side=tk.LEFT, padx=10)
+        Button(btn_frame, text="❌ Отмена", width=10, bg="#f44336", fg="white", font=("Arial", 10, "bold"), command=on_cancel).pack(side=tk.LEFT, padx=10)
 
         self.app.root.wait_window(dialog) 
         if result[0] is None:

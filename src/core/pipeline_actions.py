@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from src.pipeline.cam_pipeline import CamPipeline
+from src.gui.widgets import Button
 
 
 class PipelineActions:
@@ -131,7 +132,7 @@ class PipelineActions:
                 ent_gap_y.insert(0, f"{actual_gap:.3f}")
             except Exception as e: messagebox.showerror("Ошибка", str(e))
 
-        btn_auto = tk.Button(frame, text="✨ Авто-подбор Y (под шестерню)", bg="#E6E6FA", font=("Arial", 8, "bold"), command=auto_calc_y)
+        btn_auto = Button(frame, text="✨ Авто-подбор Y (под шестерню)", bg="#E6E6FA", font=("Arial", 8, "bold"), command=auto_calc_y)
         btn_auto.grid(row=4, column=2, rowspan=2, padx=10, sticky=tk.NS)
 
         def on_generate():
@@ -169,7 +170,7 @@ class PipelineActions:
             self.app.log("Генерация сетки массива...")
             self._run_async(self.app.services.multiply_paths, self._on_generate_array_done, self.project.master_raw_paths, self.project.array_offsets)
 
-        btn_gen = tk.Button(frame, text="✅ Применить", bg="#4CAF50", fg="white", font=("Arial", 9, "bold"), command=on_generate)
+        btn_gen = Button(frame, text="✅ Применить", bg="#4CAF50", fg="white", font=("Arial", 9, "bold"), command=on_generate)
         btn_gen.grid(row=6, column=0, columnspan=3, pady=(15, 0), sticky=tk.EW)
 
     def _on_generate_array_done(self, preview_paths):

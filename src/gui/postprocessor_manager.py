@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 from pathlib import Path
 from src.db.models import PostProcessor
+from src.gui.widgets import Button
 
 class PostprocessorManagerWindow(tk.Toplevel):
     def __init__(self, parent, services):
@@ -44,13 +45,13 @@ class PostprocessorManagerWindow(tk.Toplevel):
 
         btn_frame = tk.Frame(frame_left, bg="#f0f0f0")
         btn_frame.pack(fill=tk.X, pady=5)
-        tk.Button(btn_frame, text="➕ Добавить", bg="#4CAF50", fg="white", command=self._add_post).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
-        tk.Button(btn_frame, text="🗑 Удалить", bg="#f44336", fg="white", command=self._delete_post).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+        Button(btn_frame, text="➕ Добавить", bg="#4CAF50", fg="white", command=self._add_post).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        Button(btn_frame, text="🗑 Удалить", bg="#f44336", fg="white", command=self._delete_post).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
 
         io_frame = tk.Frame(frame_left, bg="#f0f0f0")
         io_frame.pack(fill=tk.X, pady=5)
-        tk.Button(io_frame, text="📥 Импорт", command=self._import_db).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
-        tk.Button(io_frame, text="📤 Экспорт", command=self._export_db).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
+        Button(io_frame, text="📥 Импорт", command=self._import_db).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+        Button(io_frame, text="📤 Экспорт", command=self._export_db).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(2, 0))
 
         self.frame_right = tk.LabelFrame(self, text="Параметры постпроцессора", padx=15, pady=15, font=("Arial", 10, "bold"))
         self.frame_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -84,8 +85,8 @@ class PostprocessorManagerWindow(tk.Toplevel):
 
         bot_frame = tk.Frame(self.frame_right)
         bot_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
-        tk.Button(bot_frame, text="💾 Сохранить и Закрыть", bg="#2196F3", fg="white", font=("Arial", 10, "bold"), command=self._save_and_close).pack(side=tk.RIGHT, padx=(5, 0))
-        tk.Button(bot_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
+        Button(bot_frame, text="💾 Сохранить и Закрыть", bg="#2196F3", fg="white", font=("Arial", 10, "bold"), command=self._save_and_close).pack(side=tk.RIGHT, padx=(5, 0))
+        Button(bot_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
         self._toggle_form_state(tk.DISABLED)
 
     def _refresh_listbox(self):

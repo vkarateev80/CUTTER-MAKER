@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from src.compiler.alignment_math import AlignmentTransform
+from src.gui.widgets import Button
 
 class AlignmentWindow(tk.Toplevel):
     def __init__(self, parent, ideal_marks: list[tuple[float, float]]):
@@ -74,13 +75,13 @@ class AlignmentWindow(tk.Toplevel):
         frame_btns = tk.Frame(self)
         frame_btns.pack(fill=tk.X, padx=10, pady=10)
 
-        btn_calc = tk.Button(frame_btns, text="🧮 Рассчитать погрешность", bg="#FFD700", font=("Arial", 10, "bold"), command=self._calculate)
+        btn_calc = Button(frame_btns, text="🧮 Рассчитать погрешность", bg="#FFD700", font=("Arial", 10, "bold"), command=self._calculate)
         btn_calc.pack(side=tk.LEFT, padx=(0, 10))
 
-        self.btn_apply = tk.Button(frame_btns, text="✅ Применить трансформацию", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self._apply)
+        self.btn_apply = Button(frame_btns, text="✅ Применить трансформацию", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), state=tk.DISABLED, command=self._apply)
         self.btn_apply.pack(side=tk.RIGHT)
 
-        btn_cancel = tk.Button(frame_btns, text="Отмена", command=self.destroy)
+        btn_cancel = Button(frame_btns, text="Отмена", command=self.destroy)
         btn_cancel.pack(side=tk.RIGHT, padx=10)
 
     def _calculate(self):
