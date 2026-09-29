@@ -21,4 +21,4 @@ CUTTER_MAKER_RELEASE/
 
 # Временные файлы
 *.log
-*.tmp
+*.tmp.DS_Store

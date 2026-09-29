@@ -51,14 +51,23 @@ class UIBuilder:
             v.trace_add("write", self.app.controller.update_distortion_stats)
 
         self._build()
-        self._bind_mouse_scroll(self.frame_left_container)
-        self._bind_mouse_scroll(self.frame_left)
+        # Скролл левой панели колесом/тачпадом: ЕДИНЫЙ bind_all вместо
+        # побиновки каждого виджета — на macOS Tk 9 не все события доходят
+        # до виджетных биндов (и новые виджеты потом вообще не были навешаны).
+        self._wheel_logged = 0
+        self.root.bind_all("<MouseWheel>", self._on_panel_wheel, add="+")
+        # Tk 9: тачпад шлёт ОТДЕЛЬНОЕ событие TouchpadScroll, не MouseWheel
+        self.root.bind_all("<TouchpadScroll>", self._on_touchpad_scroll, add="+")
+        self.root.bind_all("<Button-4>", self._on_panel_wheel, add="+")
+        self.root.bind_all("<Button-5>", self._on_panel_wheel, add="+")
 
     def _build(self):
         self.frame_left_container = tk.Frame(self.root, width=450)
         self.frame_left_container.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
         
-        self.left_canvas = tk.Canvas(self.frame_left_container, width=430, highlightthickness=0)
+        # yscrollincrement задаёт размер 1 unit в пикселях (Canvas не умеет
+        # scroll "pixels" — только units/pages); 4px — база для мягкого тачпада
+        self.left_canvas = tk.Canvas(self.frame_left_container, width=430, highlightthickness=0, yscrollincrement=4)
         self.left_scrollbar = tk.Scrollbar(self.frame_left_container, orient="vertical", command=self.left_canvas.yview)
         self.frame_left = tk.Frame(self.left_canvas)
         
@@ -286,19 +295,57 @@ class UIBuilder:
         self.frame_canvas = tk.LabelFrame(self.frame_right, text="Предпросмотр (ЛКМ - Выделить/Двигать | Колесико - Масштаб)", padx=5, pady=5)
         self.frame_canvas.pack(fill=tk.BOTH, expand=True)
 
-    def _on_left_scroll(self, event):
-        if event.num == 4 or getattr(event, 'delta', 0) > 0:
-            self.left_canvas.yview_scroll(-1, "units")
-        elif event.num == 5 or getattr(event, 'delta', 0) < 0:
-            self.left_canvas.yview_scroll(1, "units")
+    def _wheel_target(self, event) -> bool:
+        """True, если событие относится к левой панели (и не текстовому полю)."""
+        w = event.widget
+        if isinstance(w, (tk.Text, tk.Entry, tk.Listbox, ttk.Combobox)):
+            return False
+        node = w
+        while node is not None:
+            if node is self.frame_left_container:
+                return True
+            node = getattr(node, "master", None)
+        return False
 
-    def _bind_mouse_scroll(self, widget):
-        if not isinstance(widget, (tk.Text, ttk.Combobox, tk.Listbox)):
-            widget.bind("<MouseWheel>", self._on_left_scroll)
-            widget.bind("<Button-4>", self._on_left_scroll)
-            widget.bind("<Button-5>", self._on_left_scroll)
-        for child in widget.winfo_children():
-            self._bind_mouse_scroll(child)
+    def _wheel_log(self, event, step: int) -> None:
+        if self._wheel_logged < 64:
+            self._wheel_logged += 1
+            print(f"[WHEEL] type={event.type} num={event.num} delta={event.delta} step={step}", flush=True)
+
+    def _on_panel_wheel(self, event):
+        """Колесо мыши / X11-колесо."""
+        if not self._wheel_target(event):
+            return
+        if event.num == 4:
+            step = -1
+        elif event.num == 5:
+            step = 1
+        else:
+            delta = getattr(event, "delta", 0) or 0
+            if delta == 0:
+                return
+            step = -1 if delta > 0 else 1
+        self._wheel_log(event, step)
+        # колесо мыши: ~20px на щелчок (5 units × 4px)
+        self.left_canvas.yview_scroll(step * 5, "units")
+
+    def _on_touchpad_scroll(self, event):
+        """Тачпад (Tk 9 <TouchpadScroll>): delta = (счётчик << 16) | signed16(dy)."""
+        if not self._wheel_target(event):
+            return
+        raw = int(getattr(event, "delta", 0) or 0)
+        dy = raw & 0xFFFF
+        if dy >= 0x8000:
+            dy -= 0x10000
+        if dy == 0:
+            return
+        # dy > 0 — жест «вниз» (проверено CGEvent wheel1=-20 → dy≈+6)
+        step = 1 if dy > 0 else -1
+        self._wheel_log(event, step)
+        # Canvas принимает только units/pages: unit = 4px (yscrollincrement);
+        # масштаб по |dy| (скорость пальца): 1–3 units = 4–12px на событие
+        units = max(1, min(3, abs(dy) // 4))
+        self.left_canvas.yview_scroll(step * units, "units")
 
     def lock_ui(self):
         buttons = [self.btn_step1, self.btn_step2, self.btn_step3, self.btn_crop_marks, self.btn_reset, 
