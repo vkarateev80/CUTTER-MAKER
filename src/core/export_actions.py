@@ -9,6 +9,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
+from src.parser.engines import require_inkscape
 from src.pipeline.cam_pipeline import CamPipeline
 from src.gui.widgets import Button
 
@@ -234,8 +235,7 @@ class ExportActions:
             print("Экспорт геометрии во временный SVG...")
             pipeline = CamPipeline()
             pipeline.export_paths_to_svg(paths_to_edit, safe_svg)
-            project_root = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(os.getcwd())
-            inkscape_exe = project_root / 'inkscape_engine' / 'bin' / 'inkscape.exe' if os.name == 'nt' else Path('inkscape')
+            inkscape_exe = require_inkscape()
             print("Ожидание завершения работы Inkscape...")
             print("-> Внесите изменения, нажмите Ctrl+S и закройте Inkscape.")
             
