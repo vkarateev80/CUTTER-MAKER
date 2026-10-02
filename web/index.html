@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>CUTTER MAKER — Web</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <div class="brand">CUTTER&nbsp;MAKER <span class="tag">WEB · server-профиль</span></div>
+  <div class="steps">
+    <input type="file" id="file" accept=".dxf,.svg,.pdf,.ai,.cdr,.eps">
+    <button id="b-pipeline" class="primary">▶ Весь цикл</button>
+    <span class="sep"></span>
+    <button id="b-parse">1 · Извлечь</button>
+    <button id="b-check" disabled>2 · Анализ</button>
+    <button id="b-heal" disabled>3 · Лечение</button>
+    <button id="b-mask" disabled>УФ-маска</button>
+    <button id="b-gcode" disabled>G-код</button>
+  </div>
+</header>
+
+<main>
+  <div id="view">
+    <canvas id="cv"></canvas>
+    <div id="empty">Загрузите макет (DXF, SVG, PDF, AI, CDR, EPS) и нажмите «1 · Извлечь»</div>
+  </div>
+  <aside>
+    <h3>Слои</h3>
+    <label><input type="checkbox" id="ly-source" checked> Исходник</label>
+    <label><input type="checkbox" id="ly-healed" checked> Вылеченный</label>
+    <label><input type="checkbox" id="ly-mask" checked> Маска</label>
+    <label><input type="checkbox" id="ly-cnc" checked> УП (ЧПУ)</label>
+    <h3>Состояние</h3>
+    <div id="stats">Файл не загружен</div>
+    <h3>Журнал</h3>
+    <div id="log"></div>
+  </aside>
+</main>
+
+<footer id="status">Готов</footer>
+<script src="app.js"></script>
+</body>
+</html>
