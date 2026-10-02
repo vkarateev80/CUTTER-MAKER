@@ -1,0 +1,123 @@
+# CUTTER MAKER — server-профиль: 7 сервисов из одного образа.
+# Запуск: docker compose up -d --build     (gateway: http://127.0.0.1:8771)
+# Порт gateway переопределяется env CUTTER_GW_PORT (нужен тестам, чтобы
+# не конфликтовать с локальным desktop-профилем на :8771).
+# Остановка: docker compose down   (с данными БД: down -v)
+
+name: cutter-maker
+
+# Один общий образ. build — ТОЛЬКО у gateway: иначе compose собирает
+# один и тот же тег 7 раз параллельно и падает гонкой тегирования.
+x-svc: &svc
+  image: cutter-maker:latest
+  restart: unless-stopped
+  networks: [cutter]
+
+services:
+  ingest:
+    <<: *svc
+    command: python -m uvicorn services.ingest:app --host 0.0.0.0 --port 8765
+    healthcheck: &hc-ingest
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8765/health',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  render:
+    <<: *svc
+    command: python -m uvicorn services.render:app --host 0.0.0.0 --port 8766
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8766/health',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  geometry:
+    <<: *svc
+    command: python -m uvicorn services.geometry:app --host 0.0.0.0 --port 8767
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8767/health',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  mathsvc:
+    <<: *svc
+    command: python -m uvicorn services.math:app --host 0.0.0.0 --port 8768
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8768/health',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  cam:
+    <<: *svc
+    command: python -m uvicorn services.cam:app --host 0.0.0.0 --port 8769
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8769/health',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  state:
+    <<: *svc
+    command: python -m uvicorn services.state:app --host 0.0.0.0 --port 8770
+    volumes:
+      - state-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8770/health',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  gateway:
+    <<: *svc
+    build: .
+    command: python -m uvicorn services.gateway:app --host 0.0.0.0 --port 8771
+    ports:
+      - "${CUTTER_GW_PORT:-8771}:8771"
+    environment:
+      CUTTER_INGEST_URL: http://ingest:8765
+      CUTTER_RENDER_URL: http://render:8766
+      CUTTER_GEOMETRY_URL: http://geometry:8767
+      CUTTER_MATH_URL: http://mathsvc:8768
+      CUTTER_CAM_URL: http://cam:8769
+      CUTTER_STATE_URL: http://state:8770
+    depends_on:
+      ingest:
+        condition: service_healthy
+      render:
+        condition: service_healthy
+      geometry:
+        condition: service_healthy
+      mathsvc:
+        condition: service_healthy
+      cam:
+        condition: service_healthy
+      state:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8771/health',timeout=4).status==200 else 1)"]
+      interval: 5s
+      timeout: 6s
+      retries: 30
+      start_period: 5s
+
+networks:
+  cutter:
+
+volumes:
+  state-data:

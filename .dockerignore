@@ -1,0 +1,21 @@
+# Ограничение build context: в образ не попадают venv, движки (старые
+# Windows-бандлы), пользовательские данные и артефакты сборки презентаций.
+.venv
+venv
+.git
+.gitignore
+__pycache__
+*.pyc
+inkscape_engine
+ghostscript_engine
+Проекты
+qa
+tests
+assets
+*.pptx
+*.pdf
+*.iss
+.DS_Store
+data/*
+!data/tools.json
+!data/postprocessors.json

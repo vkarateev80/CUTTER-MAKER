@@ -258,13 +258,14 @@ class GcodeRequestDTO(BaseModel):
 
 
 class GcodeResultDTO(BaseModel):
-    """cam: слои идеального лезвия/ЧПУ и расчётное время фрезеровки."""
+    """cam: слои идеального лезвия/ЧПУ, расчётное время и текст УП."""
 
     model_config = ConfigDict(extra="ignore")
 
     ideal_paths: list[CamPathDTO] = Field(default_factory=list)
     cnc_paths: list[CamPathDTO] = Field(default_factory=list)
     time_min: float = 0.0
+    gcode_text: str = ""
 
 
 # ============================================================

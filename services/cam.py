@@ -46,6 +46,7 @@ def gcode(req: GcodeRequestDTO) -> JobRefDTO:
             ideal_paths=[p.to_dto() for p in ideal],
             cnc_paths=[p.to_dto() for p in cnc],
             time_min=time_min,
+            gcode_text=output_path.read_text(encoding="utf-8"),
         ).model_dump()
 
     return JobRefDTO(job_id=store.submit(worker))
