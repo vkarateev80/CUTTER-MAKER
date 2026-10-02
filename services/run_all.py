@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import uvicorn
 
-from services import cam, gateway, geometry, ingest, math, render, state
+from services import cam, eta, gateway, geometry, ingest, math, pricing, render, state
 
 # (имя, порт, FastAPI-приложение)
 SERVERS: list[tuple[str, int]] = [
@@ -25,6 +25,8 @@ SERVERS: list[tuple[str, int]] = [
     ("math", 8768, math.app),
     ("cam", 8769, cam.app),
     ("state", 8770, state.app),
+    ("pricing", 8774, pricing.app),
+    ("eta", 8775, eta.app),
     ("gateway", 8771, gateway.app),
 ]
 

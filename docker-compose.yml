@@ -82,6 +82,32 @@ services:
       retries: 20
       start_period: 10s
 
+  pricing:
+    <<: *svc
+    command: python -m uvicorn services.pricing:app --host 0.0.0.0 --port 8774
+    volumes:
+      - state-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8774/health',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  eta:
+    <<: *svc
+    command: python -m uvicorn services.eta:app --host 0.0.0.0 --port 8775
+    volumes:
+      - state-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8775/health',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
   gateway:
     <<: *svc
     build: .
@@ -95,6 +121,8 @@ services:
       CUTTER_MATH_URL: http://mathsvc:8768
       CUTTER_CAM_URL: http://cam:8769
       CUTTER_STATE_URL: http://state:8770
+      CUTTER_PRICING_URL: http://pricing:8774
+      CUTTER_ETA_URL: http://eta:8775
     depends_on:
       ingest:
         condition: service_healthy
@@ -107,6 +135,10 @@ services:
       cam:
         condition: service_healthy
       state:
+        condition: service_healthy
+      pricing:
+        condition: service_healthy
+      eta:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c",

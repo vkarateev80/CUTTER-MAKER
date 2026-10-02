@@ -323,7 +323,7 @@ def test_client_gateway_mode():
 
 
 # ============================================================
-# 6. run_all: супервизор поднимает все 7 сервисов
+# 6. run_all: супервизор поднимает все 9 сервисов
 # ============================================================
 
 def _port_busy(port: int) -> bool:
@@ -335,7 +335,7 @@ def _port_busy(port: int) -> bool:
 
 
 def test_run_all():
-    print("[6] run_all: все 7 сервисов, агрегированный health=true...")
+    print("[6] run_all: все 9 сервисов, агрегированный health=true...")
     import services.run_all as run_mod
 
     # Порты уже заняты (например, работает desktop-супервизор) →
@@ -346,11 +346,12 @@ def test_run_all():
         started = run_mod.start_all()
         run_mod.wait_ready(started, timeout=20)
     try:
-        assert len(started) == 7 or already_running
+        assert len(started) == 9 or already_running
 
         # health каждого сервиса напрямую
         for port, name in [(8765, "ingest"), (8766, "render"), (8767, "geometry"),
-                           (8768, "math"), (8769, "cam"), (8770, "state"), (8771, "gateway")]:
+                           (8768, "math"), (8769, "cam"), (8770, "state"),
+                           (8774, "pricing"), (8775, "eta"), (8771, "gateway")]:
             r = httpx.get(f"http://127.0.0.1:{port}/health", timeout=3)
             body = r.json()
             assert body.get("ok") is True, f"{name}: {body}"
@@ -377,7 +378,7 @@ def test_run_all():
                 except OSError:
                     break
     note = " (порты были заняты — проверен существующий стек)" if already_running else ""
-    print(f"      OK: 7 сервисов, gateway ok=true, сквозной вызов работает{note}")
+    print(f"      OK: 9 сервисов, gateway ok=true, сквозной вызов работает{note}")
 
 
 # ============================================================

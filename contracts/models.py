@@ -311,3 +311,92 @@ class StateDocDTO(BaseModel):
 
     path: str
     data: dict = Field(default_factory=dict)
+
+
+# ============================================================
+# Фаза 5+: доп-сервисы pricing (стоимость) и eta (срок изготовления)
+# ============================================================
+
+class PriceConfigDTO(BaseModel):
+    """Тарифы расчёта стоимости (state-артефакт data/pricing.json)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    rate_per_hour: float = 2500.0     # ₽ за час машинного времени
+    setup_cost: float = 500.0         # ₽ за наладку
+    material_per_mm2: float = 0.05    # ₽ за мм² (0 — без материала)
+    min_price: float = 1000.0         # минимальный заказ
+    currency: str = "RUB"
+
+
+class PriceRequestDTO(BaseModel):
+    """Расчёт стоимости одного заказа."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    time_min: float = 0.0
+    area_mm2: float = 0.0
+    config: PriceConfigDTO | None = None  # override тарифов из сохранённых
+
+
+class PriceResultDTO(BaseModel):
+    """Разбивка стоимости заказа."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    setup: float = 0.0
+    machine: float = 0.0
+    material: float = 0.0
+    subtotal: float = 0.0
+    total: float = 0.0
+    currency: str = "RUB"
+    hours: float = 0.0
+    time_min: float = 0.0
+
+
+class EtaBookRequestDTO(BaseModel):
+    """Бронь машинного времени в очередь."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    time_min: float
+    label: str = ""
+
+
+class QueueItemDTO(BaseModel):
+    """Элемент очереди ЧПУ."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    label: str = ""
+    time_min: float = 0.0
+    booked_at: str = ""
+
+
+class QueueDTO(BaseModel):
+    """Снимок очереди: элементы и суммарные минуты."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    items: list[QueueItemDTO] = Field(default_factory=list)
+    total_minutes: float = 0.0
+
+
+class EtaRequestDTO(BaseModel):
+    """Оценка срока для заказа длиной time_min."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    time_min: float = 0.0
+
+
+class EtaResultDTO(BaseModel):
+    """Срок изготовления: очередь + собственное время заказа."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    queue_minutes: float = 0.0
+    machine_minutes: float = 0.0
+    ready_minutes_from_now: float = 0.0
+    ready_at: str = ""

@@ -51,6 +51,13 @@ aside h3 {
 aside h3:first-child { margin-top: 0; }
 aside label { display: block; padding: 3px 0; cursor: pointer; }
 #stats { font-size: 13px; color: var(--gray); white-space: pre-line; }
+#biz {
+  font-size: 13px; background: #fff; border: 1px solid var(--rule);
+  border-radius: 6px; padding: 8px 10px; margin-bottom: 8px;
+  white-space: pre-line; color: var(--ink);
+}
+#biz b { color: var(--violet); }
+#b-book { width: 100%; }
 #log {
   font: 11px/1.5 ui-monospace, Menlo, monospace; color: var(--gray);
   background: #fff; border: 1px solid var(--rule); border-radius: 6px;

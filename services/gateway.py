@@ -34,6 +34,8 @@ BACKENDS: dict[str, tuple[str, str]] = {
     "math": ("CUTTER_MATH_URL", "http://127.0.0.1:8768"),
     "cam": ("CUTTER_CAM_URL", "http://127.0.0.1:8769"),
     "state": ("CUTTER_STATE_URL", "http://127.0.0.1:8770"),
+    "pricing": ("CUTTER_PRICING_URL", "http://127.0.0.1:8774"),
+    "eta": ("CUTTER_ETA_URL", "http://127.0.0.1:8775"),
 }
 
 _PROXY_TIMEOUT = httpx.Timeout(60.0, connect=2.0)

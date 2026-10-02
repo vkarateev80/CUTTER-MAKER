@@ -76,7 +76,7 @@ def test_gateway_health() -> None:
         time.sleep(1)
     assert last and last.get("ok") is True, f"health: {last}"
     assert all(last["backends"].values()), f"бэкенды: {last['backends']}"
-    print("      OK: ok=true, все 7 бэкендов онлайн")
+    print(f"      OK: ok=true, все {len(last['backends'])} бэкендов онлайн")
 
 
 def test_web_static() -> None:
@@ -164,6 +164,36 @@ def poll_root(job_id: str, timeout: float = 300.0) -> dict:
     raise TimeoutError(f"orch job {job_id}")
 
 
+def test_pricing_eta() -> None:
+    print("[7] Доп-сервисы pricing/eta через шлюз...")
+    # очередь живёт в named volume между прогонами — сначала очистка
+    q = httpx.get(f"{GW}/eta/v1/queue", timeout=10).json()
+    for it in q.get("items", []):
+        httpx.delete(f"{GW}/eta/v1/queue/{it['id']}", timeout=10)
+
+    p = httpx.post(f"{GW}/pricing/v1/price",
+                   json={"time_min": 60, "area_mm2": 1000}, timeout=10).json()
+    assert p["setup"] == 500.0, p
+    assert p["machine"] == 2500.0, p
+    assert p["material"] == 50.0, p
+    assert p["total"] == 3050.0, p
+    assert p["currency"] == "RUB", p
+
+    q = httpx.post(f"{GW}/eta/v1/book",
+                   json={"time_min": 30, "label": "t5"}, timeout=10).json()
+    assert q["total_minutes"] == 30.0, q
+    e = httpx.post(f"{GW}/eta/v1/eta", json={"time_min": 45}, timeout=10).json()
+    assert e["queue_minutes"] == 30.0, e
+    assert e["ready_minutes_from_now"] >= 75.0, e
+    assert e["ready_at"], e
+
+    for it in httpx.get(f"{GW}/eta/v1/queue", timeout=10).json()["items"]:
+        httpx.delete(f"{GW}/eta/v1/queue/{it['id']}", timeout=10)
+    left = httpx.get(f"{GW}/eta/v1/queue", timeout=10).json()
+    assert left["total_minutes"] == 0.0, left
+    print("      OK: цена 3050 ₽ за 60 мин, очередь 30+45 → ready ≥ 75 мин, очистка")
+
+
 def main() -> None:
     print("=" * 60)
     print("ФАЗА 5 — server-профиль (docker-compose + веб-клиент)")
@@ -175,6 +205,7 @@ def main() -> None:
         test_web_static()
         test_chain()
         test_pipeline_orchestrator()
+        test_pricing_eta()
     finally:
         print("[·] compose down (volume сохраняется)...")
         compose("down", check=False)

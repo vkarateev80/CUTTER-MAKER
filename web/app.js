@@ -11,6 +11,8 @@ const state = {
   maskWkt: "",
   tool: null,
   post: null,
+  timeMin: 0,
+  fileName: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -175,6 +177,7 @@ async function pipeline() {
   }
   const ref = await r.json();
   const res = await pollRoot(ref.job_id);
+  state.fileName = f.name;
   state.source = res.source_paths || [];
   state.healed = res.healed_paths || [];
   state.visual = res.visual_paths || [];
@@ -192,6 +195,38 @@ async function pipeline() {
   log(`Весь цикл: ${state.source.length} → ${state.healed.length} контуров, ` +
       `G-код ${lines} строк, ${res.time_min.toFixed(2)} мин`, "ok");
   status(`Готово: ${res.time_min.toFixed(2)} мин машинного времени, файл .nc скачан`);
+  await showBiz(res.time_min ?? 0);
+}
+
+async function showBiz(timeMin) {
+  state.timeMin = timeMin;
+  try {
+    const [p, e] = await Promise.all([
+      api("/pricing/v1/price", { time_min: timeMin, area_mm2: 0 }),
+      api("/eta/v1/eta", { time_min: timeMin }),
+    ]);
+    const fmt = (n) => n.toLocaleString("ru-RU", { maximumFractionDigits: 0 });
+    $("biz").innerHTML =
+      `Стоимость: <b>${fmt(p.total)} ${p.currency}</b>\n` +
+      `машина ${fmt(p.machine)} · наладка ${fmt(p.setup)} · материал ${fmt(p.material)}\n` +
+      `Срок: <b>${e.ready_at}</b> (≈${Math.round(e.ready_minutes_from_now)} мин с учётом очереди ${Math.round(e.queue_minutes)} мин)`;
+    $("b-book").disabled = false;
+    log(`Стоимость ${fmt(p.total)} ${p.currency}, срок ${e.ready_at}`, "ok");
+  } catch (e) {
+    $("biz").textContent = `Расчёт недоступен: ${e.message || e}`;
+    log(`pricing/eta: ${e.message || e}`, "err");
+  }
+}
+
+async function bookQueue() {
+  if (!state.timeMin) throw new Error("Нет расчётного времени заказа");
+  const q = await api("/eta/v1/book", {
+    time_min: state.timeMin, label: state.fileName || "заказ",
+  });
+  log(`Заказ в очереди: ${q.items.length} позиций, суммарно ${Math.round(q.total_minutes)} мин`, "ok");
+  const e = await api("/eta/v1/eta", { time_min: 0 });
+  $("biz").textContent += `\nВ очереди: ${Math.round(q.total_minutes)} мин, свободен ~${e.ready_at}`;
+  status("Заказ забронирован в очередь ЧПУ");
 }
 
 /* ---------------- шаги ---------------- */
@@ -297,6 +332,7 @@ async function gcode() {
   state.cnc = res.cnc_paths || [];
   updateStats(`Время фрезеровки: ${res.time_min.toFixed(2)} мин`);
   draw();
+  await showBiz(res.time_min ?? 0);
   if (res.gcode_text) {
     downloadGcode(res.gcode_text);
     log(`G-код: ${res.gcode_text.split("\n").length} строк, скачан`, "ok");
@@ -315,6 +351,7 @@ function wrap(fn) {
 
 $("b-parse").addEventListener("click", wrap(parse));
 $("b-pipeline").addEventListener("click", wrap(pipeline));
+$("b-book").addEventListener("click", wrap(bookQueue));
 $("b-check").addEventListener("click", wrap(check));
 $("b-heal").addEventListener("click", wrap(heal));
 $("b-mask").addEventListener("click", wrap(uvMask));
