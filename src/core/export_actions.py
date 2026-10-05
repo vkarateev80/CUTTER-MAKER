@@ -187,8 +187,68 @@ class ExportActions:
             else: time_str = f"{minutes} мин {seconds} сек"
                 
             self.app.log(f"Расчетное время фрезеровки: {time_str}")
-            msg = f"УП успешно сохранена:\n{cnc_file.name}\n\n⏱ Примерное время фрезеровки: {time_str}"
-            messagebox.showinfo("Готово", msg)
+            # Стоимость и срок — через доп-сервисы (HTTP или локальное ядро)
+            self._run_async(
+                lambda: (
+                    self.app.services.price(time_min),
+                    self.app.services.eta(time_min),
+                ),
+                lambda res: self._show_price_eta(time_str, res, time_min, cnc_file),
+            )
+
+    def _show_price_eta(self, time_str, result, time_min, cnc_file):
+        price_res, eta_res = result
+        win = tk.Toplevel(self.root)
+        win.title("Стоимость и срок")
+        win.geometry("430x300")
+        win.resizable(False, False)
+
+        pad = {"padx": 14, "pady": 3}
+        tk.Label(win, text=f"УП: {cnc_file.name}", font=("Arial", 10, "bold"),
+                 anchor="w", justify=tk.LEFT).pack(fill=tk.X, **pad)
+        tk.Label(win, text=f"⏱ Время фрезеровки: {time_str}",
+                 anchor="w", justify=tk.LEFT).pack(fill=tk.X, **pad)
+        tk.Label(
+            win,
+            text=(f"💰 Стоимость: {price_res.total:,.0f} {price_res.currency}\n"
+                  f"     машина {price_res.machine:,.0f} · наладка {price_res.setup:,.0f} · "
+                  f"материал {price_res.material:,.0f}"),
+            font=("Arial", 11, "bold"), fg="#5B3DF5", anchor="w", justify=tk.LEFT,
+        ).pack(fill=tk.X, **pad)
+        tk.Label(
+            win,
+            text=(f"📅 Готов: {eta_res.ready_at}\n"
+                  f"     ≈{eta_res.ready_minutes_from_now:.0f} мин с учётом очереди "
+                  f"{eta_res.queue_minutes:.0f} мин"),
+            font=("Arial", 11), anchor="w", justify=tk.LEFT,
+        ).pack(fill=tk.X, **pad)
+
+        status = tk.Label(win, text="", fg="#0F7B4F", anchor="w")
+        status.pack(fill=tk.X, padx=14, pady=4)
+
+        def to_queue():
+            label = self.project.current_project_dir.name if self.project.current_project_dir else ""
+
+            def done(q):
+                if win.winfo_exists():
+                    status.config(
+                        text=f"✓ В очереди: {len(q.items)} позиц., суммарно {q.total_minutes:.0f} мин"
+                    )
+                self.app.log(
+                    f"Заказ поставлен в очередь ЧПУ: {q.total_minutes:.0f} мин суммарно"
+                )
+
+            self._run_async(self.app.services.book_eta, done, time_min, label)
+
+        btns = tk.Frame(win)
+        btns.pack(fill=tk.X, padx=14, pady=(8, 12))
+        from src.gui.widgets import Button as TtkButton
+        TtkButton(btns, text="📅 В очередь ЧПУ", bg="#5B3DF5", fg="white",
+                  font=("Arial", 9, "bold"), command=to_queue).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 6))
+        TtkButton(btns, text="Закрыть", bg="#ECECEC", command=win.destroy).pack(
+            side=tk.LEFT, expand=True, fill=tk.X
+        )
+        win.grab_set()
 
     def generate_report(self):
         if not self.project.current_project_dir or self.project.last_milling_time_min <= 0:

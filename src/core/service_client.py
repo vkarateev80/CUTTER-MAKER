@@ -30,6 +30,9 @@ from contracts import (
     CheckErrorsResultDTO,
     CropMarksRequestDTO,
     DistortionRequestDTO,
+    EtaBookRequestDTO,
+    EtaRequestDTO,
+    EtaResultDTO,
     GcodeRequestDTO,
     GcodeResultDTO,
     HealRequestDTO,
@@ -39,6 +42,9 @@ from contracts import (
     PatternRequestDTO,
     PatternResultDTO,
     PostsPayloadDTO,
+    PriceRequestDTO,
+    PriceResultDTO,
+    QueueDTO,
     ReportRequestDTO,
     ReportResultDTO,
     RotateRequestDTO,
@@ -69,6 +75,8 @@ class ServiceClient:
         math_url: str | None = None,
         cam_url: str | None = None,
         state_url: str | None = None,
+        pricing_url: str | None = None,
+        eta_url: str | None = None,
         gateway_url: str | None = None,
         job_timeout: float = 300.0,
     ):
@@ -78,6 +86,8 @@ class ServiceClient:
         self.math_url = self._resolve(math_url, "CUTTER_MATH_URL", "http://127.0.0.1:8768")
         self.cam_url = self._resolve(cam_url, "CUTTER_CAM_URL", "http://127.0.0.1:8769")
         self.state_url = self._resolve(state_url, "CUTTER_STATE_URL", "http://127.0.0.1:8770")
+        self.pricing_url = self._resolve(pricing_url, "CUTTER_PRICING_URL", "http://127.0.0.1:8774")
+        self.eta_url = self._resolve(eta_url, "CUTTER_ETA_URL", "http://127.0.0.1:8775")
         # "" = gateway выключен (прямые URL сервисов); задан → все операции через него
         self.gateway_url = self._resolve(gateway_url, "CUTTER_GATEWAY_URL", "")
         self.job_timeout = job_timeout
@@ -501,3 +511,34 @@ class ServiceClient:
                 f"«{Path(path).name}» не UTF-8 JSON — это не документ проекта (нужен project_state.json). "
                 "Если это макет — нажмите «НОВЫЙ ПРОЕКТ (ИЗ МАКЕТА)»."
             ) from e
+
+    # ==========================================================
+    # pricing / eta: синхронные доп-сервисы (HTTP или локальное ядро)
+    # ==========================================================
+
+    def price(self, time_min: float, area_mm2: float = 0.0) -> PriceResultDTO:
+        req = PriceRequestDTO(time_min=time_min, area_mm2=area_mm2)
+        result = self._post_sync("pricing", "/v1/price", req.model_dump())
+        if result is not None:
+            return PriceResultDTO.model_validate(result)
+        from src.biz.pricing import calc_price
+
+        return calc_price(time_min, area_mm2)
+
+    def eta(self, time_min: float) -> EtaResultDTO:
+        req = EtaRequestDTO(time_min=time_min)
+        result = self._post_sync("eta", "/v1/eta", req.model_dump())
+        if result is not None:
+            return EtaResultDTO.model_validate(result)
+        from src.biz.eta_store import eta_now
+
+        return eta_now(time_min)
+
+    def book_eta(self, time_min: float, label: str = "") -> QueueDTO:
+        req = EtaBookRequestDTO(time_min=time_min, label=label)
+        result = self._post_sync("eta", "/v1/book", req.model_dump())
+        if result is not None:
+            return QueueDTO.model_validate(result)
+        from src.biz.eta_store import book
+
+        return book(time_min, label)

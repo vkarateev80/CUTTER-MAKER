@@ -21,6 +21,7 @@ from pathlib import Path
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 GW = "http://127.0.0.1:8772"
 ENV = dict(os.environ)
 ENV.setdefault("DOCKER_HOST", f"unix://{Path.home()}/.colima/default/docker.sock")
@@ -191,7 +192,21 @@ def test_pricing_eta() -> None:
         httpx.delete(f"{GW}/eta/v1/queue/{it['id']}", timeout=10)
     left = httpx.get(f"{GW}/eta/v1/queue", timeout=10).json()
     assert left["total_minutes"] == 0.0, left
-    print("      OK: цена 3050 ₽ за 60 мин, очередь 30+45 → ready ≥ 75 мин, очистка")
+
+    # локальное ядро (fallback десктоп-клиента) — та же математика
+    import tempfile
+
+    from src.biz.eta_store import book as core_book
+    from src.biz.eta_store import queue_delete as core_del
+    from src.biz.pricing import calc_price
+    local = calc_price(60, 1000)
+    assert local.total == p["total"], f"ядро {local.total} != сервис {p['total']}"
+    with tempfile.TemporaryDirectory() as td:
+        snap = core_book(5, "core", root=td)
+        assert snap.total_minutes == 5.0, snap
+        core_del(snap.items[0].id, root=td)
+    print("      OK: цена 3050 ₽ за 60 мин, очередь 30+45 → ready ≥ 75 мин, "
+          "очистка, ядро идентично сервису")
 
 
 def main() -> None:
