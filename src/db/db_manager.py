@@ -7,11 +7,12 @@ from src.db.models import Tool, PostProcessor
 
 class DatabaseManager:
     def __init__(self, root: str | Path | None = None):
-        # Определяем корень проекта (работает как в исходниках, так и в скомпилированном .exe)
-        if getattr(sys, 'frozen', False):
-            self.project_root = Path(sys.executable).parent
-        elif root is not None:
+        # Явный root (CUTTER_STATE_ROOT и т.п.) имеет приоритет: в frozen-сборке
+        # иначе БД писалась бы внутрь .app/Contents/MacOS/data.
+        if root is not None:
             self.project_root = Path(root)
+        elif getattr(sys, 'frozen', False):
+            self.project_root = Path(sys.executable).parent
         else:
             self.project_root = Path(os.getcwd())
             
